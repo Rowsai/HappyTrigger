@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.0.0.1</Version>
+    <IsPackable>false</IsPackable>
+    <Authors>Rowsai</Authors>
+    <AssemblyName>HappyTrigger</AssemblyName>
+    <RootNamespace>HappyTrigger</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="HappyTrigger.json" />
+    <Content Include="icon.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+</Project>
