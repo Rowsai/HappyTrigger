@@ -1,0 +1,10 @@
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\icon.png
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.csproj.AssemblyReference.cache
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.AssemblyInfoInputs.cache
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.AssemblyInfo.cs
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.csproj.CoreCompileInputs.cache
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.sourcelink.json
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\HappyTrigger.deps.json
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\HappyTrigger.dll
