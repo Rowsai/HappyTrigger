@@ -4,16 +4,18 @@
   "InternalName": "HappyTrigger",
   "AssemblyVersion": "0.0.0.1",
   "Description": "Display images or text when chat log keywords appear.",
-  "Punchline": "Display images or text when chat keywords appear.",
   "ApplicableVersion": "any",
   "Tags": [
     "chat",
     "image",
     "popup"
   ],
-  "IconUrl": "https://raw.githubusercontent.com/Rowsai/HappyTrigger/main/image/icon.png",
   "DalamudApiLevel": 15,
   "LoadRequiredState": 0,
   "LoadSync": false,
-  "CanUnloadAsync": false
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "IconUrl": "https://raw.githubusercontent.com/Rowsai/HappyTrigger/main/image/icon.png",
+  "Punchline": "Display images or text when chat keywords appear.",
+  "AcceptsFeedback": true
 }
