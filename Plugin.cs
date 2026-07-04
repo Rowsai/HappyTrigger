@@ -2,11 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
+using Dalamud.Game;
+using Dalamud.Hooking;
 using Dalamud.Game.Command;
 using Dalamud.Game.ClientState.Objects;
 using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Windowing;
@@ -14,6 +18,7 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using LuminaAction = Lumina.Excel.Sheets.Action;
+using LuminaStatus = Lumina.Excel.Sheets.Status;
 
 namespace HappyTrigger;
 
@@ -39,6 +44,9 @@ public sealed class Plugin : IDalamudPlugin
     internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
+    internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
+
+    [PluginService]
     internal static ITextureProvider TextureProvider { get; private set; } = null!;
 
     [PluginService]
@@ -47,13 +55,18 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("HappyTrigger");
     private readonly Configuration configuration;
     private readonly ImageCacheService imageCacheService;
+    private readonly VfxLogCollector vfxLogCollector;
     private readonly HappyTriggerWindow configWindow;
     private readonly List<PopupImageState> activePopups = new();
     private readonly List<FfxivLogEntry> battleLogs = new();
     private readonly List<FfxivLogEntry> internalLogs = new();
     private readonly object logLock = new();
     private readonly HashSet<string> activeEnemyCastingLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> activeMemberStatusLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> activeEnemyStatusLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StatusRemainingSnapshot> latestMemberStatusRemainingByJobAndName = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FfxivLogReferenceMatchState> ffxivLogReferenceMatchStates = new(StringComparer.OrdinalIgnoreCase);
+    private bool wasFullWipeDetected = false;
 
     public Plugin()
     {
@@ -82,6 +95,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         this.imageCacheService = new ImageCacheService(TextureProvider);
+        this.vfxLogCollector = new VfxLogCollector(ObjectTable, GameInteropProvider, Log, this.AddVfxInternalLog);
         this.configWindow = new HappyTriggerWindow(
             this.configuration,
             this.SaveConfig,
@@ -239,6 +253,11 @@ public sealed class Plugin : IDalamudPlugin
                 this.ActivatePopup(trigger);
             }
         }
+    }
+
+    private void AddVfxInternalLog(string text)
+    {
+        this.AddInternalLog(text);
     }
 
     private FfxivLogEntry AddBattleLog(string category, string text)
@@ -533,10 +552,18 @@ public sealed class Plugin : IDalamudPlugin
 
     private void FireFfxivLogReferenceTrigger(HappyTriggerSetting trigger, FfxivLogReferenceSource source)
     {
+        StatusRemainingSnapshot? statusRemainingSnapshot = null;
+        if (trigger.HasStatusRemainingAppendSetting() && !this.TryGetStatusRemainingSnapshot(trigger, out statusRemainingSnapshot))
+        {
+            this.AddInternalLog(
+                $"Status remaining not found. Id={trigger.TriggerId} job={trigger.StatusRemainingJob} StatusName={trigger.StatusRemainingStatusName}",
+                false);
+        }
+
         this.AddInternalLog(
-            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}'",
+            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName}" : "OFF")}",
             false);
-        this.ActivatePopup(trigger, false);
+        this.ActivatePopup(trigger, false, statusRemainingSnapshot);
     }
 
     private IReadOnlyList<FfxivLogEntry> GetBattleLogsSnapshot()
@@ -567,7 +594,10 @@ public sealed class Plugin : IDalamudPlugin
         this.AddInternalLog("FFXIV Log cleared.");
     }
 
-    private void ActivatePopup(HappyTriggerSetting trigger, bool writeInternalLog = true)
+    private void ActivatePopup(
+        HappyTriggerSetting trigger,
+        bool writeInternalLog = true,
+        StatusRemainingSnapshot? statusRemainingSnapshot = null)
     {
         if (trigger.DisplayTextMode)
         {
@@ -578,7 +608,13 @@ public sealed class Plugin : IDalamudPlugin
 
             trigger.DisplayTextMode = true;
             this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
-            this.activePopups.Add(new PopupImageState(trigger));
+            var statusRemainingDisplayState = statusRemainingSnapshot == null
+                ? null
+                : new StatusRemainingDisplayState(
+                    statusRemainingSnapshot.StatusName,
+                    statusRemainingSnapshot.RemainingSeconds,
+                    statusRemainingSnapshot.CapturedAtUtc);
+            this.activePopups.Add(new PopupImageState(trigger, false, statusRemainingDisplayState));
             if (writeInternalLog)
             {
                 this.AddInternalLog($"Text display queued. Text='{trigger.DisplayText}', Wait={Math.Clamp(trigger.WaitSeconds, 0.0f, 600.0f):0.##}s, X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
@@ -631,8 +667,242 @@ public sealed class Plugin : IDalamudPlugin
     private void Draw()
     {
         this.UpdateEnemyCastingInternalLogs();
+        this.UpdateMemberStatusInternalLogs();
+        this.UpdateEnemyStatusInternalLogs();
+        this.UpdateFullWipeDetection();
         this.windowSystem.Draw();
         this.DrawActivePopups();
+    }
+
+    private void UpdateFullWipeDetection()
+    {
+        try
+        {
+            var players = GetReplayPlayerCharacters()
+                .Where(player => player.MaxHp > 0)
+                .ToList();
+
+            if (players.Count == 0)
+            {
+                this.wasFullWipeDetected = false;
+                return;
+            }
+
+            var isFullWipe = players.All(player => player.CurrentHp <= 0);
+            if (!isFullWipe)
+            {
+                this.wasFullWipeDetected = false;
+                return;
+            }
+
+            var removedCount = this.CloseAllTextPopups();
+            if (!this.wasFullWipeDetected)
+            {
+                this.wasFullWipeDetected = true;
+                this.AddInternalLog($"Full wipe detected. Text displays closed. Count={removedCount}", false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Failed to update full wipe detection.");
+        }
+    }
+
+    private int CloseAllTextPopups()
+    {
+        return this.activePopups.RemoveAll(popup =>
+            !popup.IsPositionSetting &&
+            popup.Trigger.DisplayTextMode);
+    }
+
+    private void UpdateMemberStatusInternalLogs()
+    {
+        try
+        {
+            var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var player in GetReplayPlayerCharacters())
+            {
+                var memberName = player.Name.TextValue;
+                var job = player.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "-";
+                var statuses = player.StatusList;
+
+                for (var i = 0; i < statuses.Length; i++)
+                {
+                    var status = statuses[i];
+
+                    if (status == null || status.StatusId == 0)
+                    {
+                        continue;
+                    }
+
+                    var statusName = GetStatusName(status.StatusId);
+                    this.UpdateStatusRemainingSnapshot(job, statusName, status.RemainingTime);
+                    var key = $"Member:{player.EntityId}:{memberName}:{job}:{status.StatusId}:{status.Param}:{status.SourceId}:{i}";
+                    currentKeys.Add(key);
+
+                    if (this.activeMemberStatusLogKeys.Add(key))
+                    {
+                        this.AddMemberStatusInternalLog(
+                            job,
+                            status.StatusId,
+                            statusName,
+                            status.Param,
+                            status.RemainingTime);
+                    }
+                }
+            }
+
+            this.activeMemberStatusLogKeys.RemoveWhere(key => !currentKeys.Contains(key));
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Failed to update member status internal logs.");
+        }
+    }
+
+    private void UpdateStatusRemainingSnapshot(string job, string statusName, float remainingSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(job) || string.IsNullOrWhiteSpace(statusName) || remainingSeconds <= 0.0f)
+        {
+            return;
+        }
+
+        this.latestMemberStatusRemainingByJobAndName[MakeStatusRemainingKey(job, statusName)] = new StatusRemainingSnapshot(
+            job,
+            statusName,
+            remainingSeconds,
+            DateTime.UtcNow);
+    }
+
+    private bool TryGetStatusRemainingSnapshot(HappyTriggerSetting trigger, out StatusRemainingSnapshot? snapshot)
+    {
+        snapshot = null;
+
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return false;
+        }
+
+        var key = MakeStatusRemainingKey(trigger.StatusRemainingJob, trigger.StatusRemainingStatusName);
+        if (!this.latestMemberStatusRemainingByJobAndName.TryGetValue(key, out var found))
+        {
+            return false;
+        }
+
+        var currentRemaining = found.RemainingSeconds - (float)Math.Max(0.0, (DateTime.UtcNow - found.CapturedAtUtc).TotalSeconds);
+        if (currentRemaining <= 0.0f)
+        {
+            this.latestMemberStatusRemainingByJobAndName.Remove(key);
+            return false;
+        }
+
+        snapshot = new StatusRemainingSnapshot(found.Job, found.StatusName, currentRemaining, DateTime.UtcNow);
+        return true;
+    }
+
+    private static string MakeStatusRemainingKey(string job, string statusName)
+    {
+        return $"{job.Trim()}::{statusName.Trim()}";
+    }
+
+    private void AddMemberStatusInternalLog(
+        string job,
+        uint statusId,
+        string statusName,
+        ushort param,
+        float remaining)
+    {
+        this.AddInternalLog($"MemberStatus Information. job={job} StatusId={statusId} StatusName={statusName} Param={param} Remaining={remaining:0.00}s");
+    }
+
+    private void UpdateEnemyStatusInternalLogs()
+    {
+        try
+        {
+            var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var battleChara in GetEnemyBattleCharas())
+            {
+                var enemyName = battleChara.Name.TextValue;
+                var entityId = battleChara.EntityId;
+                var statuses = battleChara.StatusList;
+
+                for (var i = 0; i < statuses.Length; i++)
+                {
+                    var status = statuses[i];
+
+                    if (status == null || status.StatusId == 0)
+                    {
+                        continue;
+                    }
+
+                    var statusName = GetStatusName(status.StatusId);
+                    var key = $"Enemy:{entityId}:{enemyName}:{status.StatusId}:{status.Param}:{status.SourceId}:{i}";
+                    currentKeys.Add(key);
+
+                    if (this.activeEnemyStatusLogKeys.Add(key))
+                    {
+                        this.AddEnemyStatusInternalLog(
+                            enemyName,
+                            status.StatusId,
+                            statusName,
+                            status.Param,
+                            status.RemainingTime,
+                            status.SourceId);
+                    }
+                }
+            }
+
+            this.activeEnemyStatusLogKeys.RemoveWhere(key => !currentKeys.Contains(key));
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Failed to update enemy status internal logs.");
+        }
+    }
+
+    private void AddEnemyStatusInternalLog(
+        string enemyName,
+        uint statusId,
+        string statusName,
+        ushort param,
+        float remaining,
+        ulong sourceId)
+    {
+        this.AddInternalLog($"EnemyStatus Information. Enemy={enemyName} StatusId={statusId} StatusName={statusName} Param={param} Remaining={remaining:0.00}s SourceId={sourceId}");
+    }
+
+    private static string GetStatusName(uint statusId)
+    {
+        if (statusId == 0)
+        {
+            return "-";
+        }
+
+        try
+        {
+            var statusSheet = DataManager.GetExcelSheet<LuminaStatus>();
+            var status = statusSheet.GetRow(statusId);
+            var statusName = status.Name.ExtractText();
+            return string.IsNullOrWhiteSpace(statusName) ? "-" : statusName;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, $"Failed to get status name. StatusId={statusId}");
+            return "-";
+        }
+    }
+
+    private static List<IPlayerCharacter> GetReplayPlayerCharacters()
+    {
+        return ObjectTable
+            .Where(obj => obj is IPlayerCharacter)
+            .Cast<IPlayerCharacter>()
+            .Where(player => !string.IsNullOrWhiteSpace(player.Name.TextValue))
+            .OrderBy(player => player.Name.TextValue, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(player => player.EntityId)
+            .ToList();
     }
 
     private void UpdateEnemyCastingInternalLogs()
@@ -835,7 +1105,6 @@ public sealed class Plugin : IDalamudPlugin
             ImGuiWindowFlags.NoScrollWithMouse |
             ImGuiWindowFlags.AlwaysAutoResize;
 
-        var fontScale = Math.Max(0.25f, trigger.TextSize / 16.0f);
         var fadeAlpha = CalculateTextFadeAlpha(popup);
         var textColor = new Vector4(
             Math.Clamp(trigger.TextColorR, 0.0f, 1.0f),
@@ -847,45 +1116,43 @@ public sealed class Plugin : IDalamudPlugin
             Math.Clamp(trigger.TextOutlineColorG, 0.0f, 1.0f),
             Math.Clamp(trigger.TextOutlineColorB, 0.0f, 1.0f),
             Math.Clamp(trigger.TextOutlineColorA, 0.0f, 1.0f) * fadeAlpha);
+        var shadowColor = new Vector4(
+            Math.Clamp(trigger.TextShadowColorR, 0.0f, 1.0f),
+            Math.Clamp(trigger.TextShadowColorG, 0.0f, 1.0f),
+            Math.Clamp(trigger.TextShadowColorB, 0.0f, 1.0f),
+            Math.Clamp(trigger.TextShadowColorA, 0.0f, 1.0f) * fadeAlpha);
 
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(4.0f, 2.0f));
 
         if (ImGui.Begin(windowName, flags))
         {
-            ImGui.SetWindowFontScale(fontScale);
-
-            var displayText = trigger.DisplayText ?? string.Empty;
-            var textSize = ImGui.CalcTextSize(displayText);
-            var drawPos = ImGui.GetCursorScreenPos();
+            var displayText = GetPopupDisplayText(popup);
             var drawList = ImGui.GetWindowDrawList();
             var font = ImGui.GetFont();
-            var fontSize = ImGui.GetFontSize();
+            var baseFontSize = Math.Max(1.0f, ImGui.GetFontSize());
+            var fontSize = Math.Clamp(trigger.TextSize, 8.0f, 256.0f);
+            var fontScale = fontSize / baseFontSize;
+            var textSize = ImGui.CalcTextSize(displayText) * fontScale;
+            var drawPos = ImGui.GetCursorScreenPos();
 
-            if (trigger.EnableTextOutline)
+            if (trigger.EnableTextPixelSnap)
             {
-                var outlineThickness = Math.Max(1.0f, trigger.TextOutlineThickness);
-                var offsets = new[]
-                {
-                    new Vector2(-outlineThickness, 0.0f),
-                    new Vector2(outlineThickness, 0.0f),
-                    new Vector2(0.0f, -outlineThickness),
-                    new Vector2(0.0f, outlineThickness),
-                    new Vector2(-outlineThickness, -outlineThickness),
-                    new Vector2(-outlineThickness, outlineThickness),
-                    new Vector2(outlineThickness, -outlineThickness),
-                    new Vector2(outlineThickness, outlineThickness),
-                };
-
-                var outlineU32 = ImGui.GetColorU32(outlineColor);
-                foreach (var offset in offsets)
-                {
-                    drawList.AddText(font, fontSize, drawPos + offset, outlineU32, displayText);
-                }
+                drawPos = new Vector2(MathF.Round(drawPos.X), MathF.Round(drawPos.Y));
             }
 
-            drawList.AddText(font, fontSize, drawPos, ImGui.GetColorU32(textColor), displayText);
-            ImGui.Dummy(textSize);
-            ImGui.SetWindowFontScale(1.0f);
+            DrawDecoratedText(
+                drawList,
+                font,
+                fontSize,
+                drawPos,
+                displayText,
+                ImGui.GetColorU32(textColor),
+                ImGui.GetColorU32(outlineColor),
+                ImGui.GetColorU32(shadowColor),
+                trigger);
+
+            var extraPadding = CalculateTextDecoratePadding(trigger);
+            ImGui.Dummy(textSize + new Vector2(extraPadding * 2.0f, extraPadding * 2.0f));
 
             if (popup.IsPositionSetting)
             {
@@ -895,6 +1162,141 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private static string GetPopupDisplayText(PopupImageState popup)
+    {
+        var trigger = popup.Trigger;
+        var displayText = trigger.DisplayText ?? string.Empty;
+
+        if (!popup.HasStatusRemainingDisplay)
+        {
+            return displayText;
+        }
+
+        var remaining = popup.CurrentStatusRemainingSeconds;
+        var suffix = $"{popup.StatusRemainingStatusName}（{remaining:0.00}s）";
+
+        if (string.IsNullOrWhiteSpace(displayText))
+        {
+            return suffix;
+        }
+
+        if (displayText.Contains(popup.StatusRemainingStatusName, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{displayText}（{remaining:0.00}s）";
+        }
+
+        return $"{displayText} {suffix}";
+    }
+
+    private static void DrawDecoratedText(
+        ImDrawListPtr drawList,
+        ImFontPtr font,
+        float fontSize,
+        Vector2 drawPos,
+        string displayText,
+        uint textColor,
+        uint outlineColor,
+        uint shadowColor,
+        HappyTriggerSetting trigger)
+    {
+        if (string.IsNullOrEmpty(displayText))
+        {
+            return;
+        }
+
+        if (trigger.TextFontDesign == TextFontDesign.Shadow || trigger.TextFontDesign == TextFontDesign.Neon)
+        {
+            var shadowOffset = new Vector2(trigger.TextShadowOffsetX, trigger.TextShadowOffsetY);
+            drawList.AddText(font, fontSize, drawPos + shadowOffset, shadowColor, displayText);
+        }
+
+        if (trigger.TextFontDesign == TextFontDesign.Neon)
+        {
+            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 4.0f, true);
+            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 7.0f, false);
+        }
+
+        var useOutline = trigger.EnableTextOutline || trigger.TextFontDesign == TextFontDesign.StrongOutline;
+        if (useOutline)
+        {
+            var outlineThickness = Math.Max(1.0f, trigger.TextOutlineThickness);
+            if (trigger.TextFontDesign == TextFontDesign.StrongOutline)
+            {
+                outlineThickness = Math.Max(3.0f, outlineThickness * 1.5f);
+            }
+
+            DrawTextOffsets(drawList, font, fontSize, drawPos, outlineColor, displayText, outlineThickness, true);
+        }
+
+        if (trigger.TextFontDesign == TextFontDesign.Bold)
+        {
+            drawList.AddText(font, fontSize, drawPos + new Vector2(1.0f, 0.0f), textColor, displayText);
+            drawList.AddText(font, fontSize, drawPos + new Vector2(0.0f, 1.0f), textColor, displayText);
+            drawList.AddText(font, fontSize, drawPos + new Vector2(1.0f, 1.0f), textColor, displayText);
+        }
+
+        drawList.AddText(font, fontSize, drawPos, textColor, displayText);
+    }
+
+    private static void DrawTextOffsets(
+        ImDrawListPtr drawList,
+        ImFontPtr font,
+        float fontSize,
+        Vector2 drawPos,
+        uint color,
+        string text,
+        float thickness,
+        bool includeDiagonals)
+    {
+        var offsets = includeDiagonals
+            ? new[]
+            {
+                new Vector2(-thickness, 0.0f),
+                new Vector2(thickness, 0.0f),
+                new Vector2(0.0f, -thickness),
+                new Vector2(0.0f, thickness),
+                new Vector2(-thickness, -thickness),
+                new Vector2(-thickness, thickness),
+                new Vector2(thickness, -thickness),
+                new Vector2(thickness, thickness),
+            }
+            : new[]
+            {
+                new Vector2(-thickness, 0.0f),
+                new Vector2(thickness, 0.0f),
+                new Vector2(0.0f, -thickness),
+                new Vector2(0.0f, thickness),
+            };
+
+        foreach (var offset in offsets)
+        {
+            drawList.AddText(font, fontSize, drawPos + offset, color, text);
+        }
+    }
+
+    private static float CalculateTextDecoratePadding(HappyTriggerSetting trigger)
+    {
+        var padding = 4.0f;
+
+        if (trigger.EnableTextOutline || trigger.TextFontDesign == TextFontDesign.StrongOutline)
+        {
+            padding = Math.Max(padding, Math.Max(1.0f, trigger.TextOutlineThickness) * 2.0f);
+        }
+
+        if (trigger.TextFontDesign == TextFontDesign.Shadow || trigger.TextFontDesign == TextFontDesign.Neon)
+        {
+            padding = Math.Max(padding, Math.Abs(trigger.TextShadowOffsetX) + 4.0f);
+            padding = Math.Max(padding, Math.Abs(trigger.TextShadowOffsetY) + 4.0f);
+        }
+
+        if (trigger.TextFontDesign == TextFontDesign.Neon)
+        {
+            padding = Math.Max(padding, 10.0f);
+        }
+
+        return padding;
     }
 
     private static float CalculateTextFadeAlpha(PopupImageState popup)
@@ -1007,6 +1409,26 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandName);
 
         this.windowSystem.RemoveAllWindows();
+        this.vfxLogCollector.Dispose();
         this.imageCacheService.Dispose();
     }
+}
+
+internal sealed class StatusRemainingSnapshot
+{
+    public StatusRemainingSnapshot(string job, string statusName, float remainingSeconds, DateTime capturedAtUtc)
+    {
+        this.Job = job;
+        this.StatusName = statusName;
+        this.RemainingSeconds = remainingSeconds;
+        this.CapturedAtUtc = capturedAtUtc;
+    }
+
+    public string Job { get; }
+
+    public string StatusName { get; }
+
+    public float RemainingSeconds { get; }
+
+    public DateTime CapturedAtUtc { get; }
 }

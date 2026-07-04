@@ -4,6 +4,15 @@ using System.Linq;
 
 namespace HappyTrigger;
 
+public enum TextFontDesign
+{
+    Normal = 0,
+    Bold = 1,
+    Shadow = 2,
+    StrongOutline = 3,
+    Neon = 4,
+}
+
 [Serializable]
 public sealed class HappyTriggerSetting
 {
@@ -35,6 +44,16 @@ public sealed class HappyTriggerSetting
 
     // UsePrerequisite=true の場合に、前提条件として扱う保存済みトリガーIDです。
     public string PrerequisiteTriggerId { get; set; } = string.Empty;
+
+
+    // FFXIV Log参照用トリガーで、表示テキストの末尾にステータス残り時間を付与するかどうかです。
+    public bool EnableStatusRemainingAppend { get; set; } = false;
+
+    // EnableStatusRemainingAppend=true の場合に参照するジョブです。例: PLD / WHM / RDM。
+    public string StatusRemainingJob { get; set; } = string.Empty;
+
+    // EnableStatusRemainingAppend=true の場合に参照するステータス名です。例: 水属性圧縮。
+    public string StatusRemainingStatusName { get; set; } = string.Empty;
 
     // UseFfxivLogReference=true の場合に、バトルログ側で判定する文字列です。
     public string BattleLogKeyword { get; set; } = string.Empty;
@@ -88,6 +107,25 @@ public sealed class HappyTriggerSetting
 
     public float TextSize { get; set; } = 32.0f;
 
+    // 表示テキストのフォントデザインです。
+    // Normal=標準、Bold=太字、Shadow=影付き、StrongOutline=黒縁強調、Neon=ネオン風。
+    public TextFontDesign TextFontDesign { get; set; } = TextFontDesign.Normal;
+
+    // true の場合、描画位置を整数座標に丸めて文字のにじみを抑えます。
+    public bool EnableTextPixelSnap { get; set; } = true;
+
+    public float TextShadowOffsetX { get; set; } = 3.0f;
+
+    public float TextShadowOffsetY { get; set; } = 3.0f;
+
+    public float TextShadowColorR { get; set; } = 0.0f;
+
+    public float TextShadowColorG { get; set; } = 0.0f;
+
+    public float TextShadowColorB { get; set; } = 0.0f;
+
+    public float TextShadowColorA { get; set; } = 0.70f;
+
     public float TextColorR { get; set; } = 1.0f;
 
     public float TextColorG { get; set; } = 1.0f;
@@ -125,6 +163,9 @@ public sealed class HappyTriggerSetting
             UseFfxivLogReference = this.UseFfxivLogReference,
             UsePrerequisite = this.UsePrerequisite,
             PrerequisiteTriggerId = this.PrerequisiteTriggerId,
+            EnableStatusRemainingAppend = this.EnableStatusRemainingAppend,
+            StatusRemainingJob = this.StatusRemainingJob,
+            StatusRemainingStatusName = this.StatusRemainingStatusName,
             BattleLogKeyword = this.BattleLogKeyword,
             InternalLogKeyword = this.InternalLogKeyword,
             InternalLogKeywords = this.GetInternalLogKeywords().ToList(),
@@ -143,6 +184,14 @@ public sealed class HappyTriggerSetting
             ScalePercent = this.ScalePercent,
 
             TextSize = this.TextSize,
+            TextFontDesign = this.TextFontDesign,
+            EnableTextPixelSnap = this.EnableTextPixelSnap,
+            TextShadowOffsetX = this.TextShadowOffsetX,
+            TextShadowOffsetY = this.TextShadowOffsetY,
+            TextShadowColorR = this.TextShadowColorR,
+            TextShadowColorG = this.TextShadowColorG,
+            TextShadowColorB = this.TextShadowColorB,
+            TextShadowColorA = this.TextShadowColorA,
             TextColorR = this.TextColorR,
             TextColorG = this.TextColorG,
             TextColorB = this.TextColorB,
@@ -258,6 +307,16 @@ public sealed class HappyTriggerSetting
         this.InternalLogKeywords = keywords;
         this.InternalLogKeyword = string.Join(InternalLogKeywordDelimiter, keywords);
     }
+
+    public bool HasStatusRemainingAppendSetting()
+    {
+        return this.UseFfxivLogReference
+            && this.DisplayTextMode
+            && this.EnableStatusRemainingAppend
+            && !string.IsNullOrWhiteSpace(this.StatusRemainingJob)
+            && !string.IsNullOrWhiteSpace(this.StatusRemainingStatusName);
+    }
+
 
     private static void AddInternalLogKeywordParts(List<string> results, string? keywordText)
     {

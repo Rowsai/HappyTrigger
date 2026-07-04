@@ -17,6 +17,7 @@ public sealed class HappyTriggerWindow : Window
     }
 
     private const int StyleColorCount = 12;
+    private const int MaxVisibleLogRows = 30;
 
     private readonly Configuration configuration;
     private readonly Action saveConfig;
@@ -29,6 +30,8 @@ public sealed class HappyTriggerWindow : Window
 
     private bool autoScrollBattleLog = true;
     private bool autoScrollInternalLog = true;
+    private string battleLogSearchText = string.Empty;
+    private string internalLogSearchText = string.Empty;
     private int selectedBattleLogIndex = -1;
     private int selectedInternalLogIndex = -1;
     private bool requestOpenTriggerEditTab = false;
@@ -337,6 +340,38 @@ public sealed class HappyTriggerWindow : Window
             this.SetEditingInternalLogKeywords(internalLogKeywords);
         }
 
+        ImGui.Spacing();
+        var enableStatusRemainingAppend = this.editTrigger.EnableStatusRemainingAppend;
+        if (ImGui.Checkbox("ステータスの残り時間を取得する", ref enableStatusRemainingAppend))
+        {
+            this.editTrigger.EnableStatusRemainingAppend = enableStatusRemainingAppend;
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("ONの場合、指定したジョブ/ステータス名の残り時間を表示テキスト末尾に付与します。");
+
+        if (this.editTrigger.EnableStatusRemainingAppend)
+        {
+            var statusJob = RemoveLineBreaks(this.editTrigger.StatusRemainingJob ?? string.Empty);
+            ImGui.SetNextItemWidth(180.0f);
+            if (ImGui.InputText("ジョブ", ref statusJob, 64))
+            {
+                this.editTrigger.StatusRemainingJob = RemoveLineBreaks(statusJob).Trim();
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled("例: PLD / WHM / RDM");
+
+            var statusName = RemoveLineBreaks(this.editTrigger.StatusRemainingStatusName ?? string.Empty);
+            ImGui.SetNextItemWidth(360.0f);
+            if (ImGui.InputText("ステータス名", ref statusName, 256))
+            {
+                this.editTrigger.StatusRemainingStatusName = RemoveLineBreaks(statusName).Trim();
+            }
+
+            ImGui.TextDisabled("例: job=PLD StatusName=水属性圧縮 のログがある場合、表示テキスト末尾に 水属性圧縮（75.99s） のように表示し、表示開始後にカウントダウンします。");
+        }
+
         ImGui.TextDisabled("保存時は 内部ログ1_@_内部ログ2_@_内部ログn の形式で保持します。編集時は _@_ で分割して各入力欄に戻します。");
         ImGui.TextDisabled("全角で ＿＠＿ と保存済みの場合も同じ区切り文字として扱います。入力欄内の改行は自動で除去します。");
         ImGui.TextDisabled("バトルログのみ、内部ログのみでも動作します。バトルログと内部ログを両方設定した場合は、すべての条件が揃った場合に発火します。");
@@ -490,6 +525,52 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.TextSize = Math.Clamp(textSize, 8.0f, 256.0f);
         }
 
+        var fontDesign = (int)this.editTrigger.TextFontDesign;
+        var fontDesignLabels = new[] { "標準", "太字", "影付き", "黒縁強調", "ネオン風" };
+        ImGui.SetNextItemWidth(220.0f);
+        if (ImGui.Combo("フォントデザイン", ref fontDesign, fontDesignLabels, fontDesignLabels.Length))
+        {
+            this.editTrigger.TextFontDesign = (TextFontDesign)Math.Clamp(fontDesign, 0, fontDesignLabels.Length - 1);
+        }
+
+        var enablePixelSnap = this.editTrigger.EnableTextPixelSnap;
+        if (ImGui.Checkbox("文字をきれいに表示する", ref enablePixelSnap))
+        {
+            this.editTrigger.EnableTextPixelSnap = enablePixelSnap;
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("ONの場合、描画位置を整数座標に丸めて文字のにじみを抑えます。");
+
+        if (this.editTrigger.TextFontDesign == TextFontDesign.Shadow || this.editTrigger.TextFontDesign == TextFontDesign.Neon)
+        {
+            var shadowOffsetX = this.editTrigger.TextShadowOffsetX;
+            ImGui.SetNextItemWidth(180.0f);
+            if (ImGui.InputFloat("影の位置 X", ref shadowOffsetX, 0.5f, 1.0f))
+            {
+                this.editTrigger.TextShadowOffsetX = Math.Clamp(shadowOffsetX, -32.0f, 32.0f);
+            }
+
+            var shadowOffsetY = this.editTrigger.TextShadowOffsetY;
+            ImGui.SetNextItemWidth(180.0f);
+            if (ImGui.InputFloat("影の位置 Y", ref shadowOffsetY, 0.5f, 1.0f))
+            {
+                this.editTrigger.TextShadowOffsetY = Math.Clamp(shadowOffsetY, -32.0f, 32.0f);
+            }
+
+            var shadowColor = new Vector4(
+                this.editTrigger.TextShadowColorR,
+                this.editTrigger.TextShadowColorG,
+                this.editTrigger.TextShadowColorB,
+                this.editTrigger.TextShadowColorA);
+            if (ImGui.ColorEdit4("影・発光色", ref shadowColor))
+            {
+                this.editTrigger.TextShadowColorR = shadowColor.X;
+                this.editTrigger.TextShadowColorG = shadowColor.Y;
+                this.editTrigger.TextShadowColorB = shadowColor.Z;
+                this.editTrigger.TextShadowColorA = shadowColor.W;
+            }
+        }
+
         var textColor = new Vector4(
             this.editTrigger.TextColorR,
             this.editTrigger.TextColorG,
@@ -555,7 +636,7 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.DisplaySeconds = Math.Max(0.1f, seconds);
         }
 
-        ImGui.TextDisabled("トリガー文字にヒットした場合、ここで指定した文字を画面位置X/Yに表示します。色・枠線・フェードインもこの設定が反映されます。");
+        ImGui.TextDisabled("トリガー文字にヒットした場合、ここで指定した文字を画面位置X/Yに表示します。色・フォントデザイン・枠線・フェードインが反映されます。");
     }
 
     private void DrawImageSettingArea()
@@ -680,6 +761,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("高さ", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("倍率", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("待機/表示", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("残り時間", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableHeadersRow();
 
@@ -751,7 +833,7 @@ public sealed class HappyTriggerWindow : Window
 
         var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("HappyTriggerTextTriggerTable", 12, tableFlags))
+        if (ImGui.BeginTable("HappyTriggerTextTriggerTable", 13, tableFlags))
         {
             ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 50.0f);
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 80.0f);
@@ -759,11 +841,13 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("トリガー文字");
             ImGui.TableSetupColumn("表示テキスト");
             ImGui.TableSetupColumn("サイズ", ImGuiTableColumnFlags.WidthFixed, 70.0f);
+            ImGui.TableSetupColumn("フォント", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("色", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("枠線", ImGuiTableColumnFlags.WidthFixed, 60.0f);
             ImGui.TableSetupColumn("Fade", ImGuiTableColumnFlags.WidthFixed, 60.0f);
             ImGui.TableSetupColumn("X/Y", ImGuiTableColumnFlags.WidthFixed, 120.0f);
             ImGui.TableSetupColumn("待機/表示", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("残り時間", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableHeadersRow();
 
@@ -797,29 +881,32 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.Text($"{trigger.TextSize:0}");
 
                 ImGui.TableSetColumnIndex(6);
+                ImGui.Text(GetTextFontDesignLabel(trigger.TextFontDesign));
+
+                ImGui.TableSetColumnIndex(7);
                 ImGui.Text($"RGBA");
                 if (ImGui.IsItemHovered())
                 {
                     ImGui.SetTooltip($"R:{trigger.TextColorR:0.00} G:{trigger.TextColorG:0.00} B:{trigger.TextColorB:0.00} A:{trigger.TextColorA:0.00}");
                 }
 
-                ImGui.TableSetColumnIndex(7);
+                ImGui.TableSetColumnIndex(8);
                 ImGui.Text(trigger.EnableTextOutline ? $"ON({trigger.TextOutlineThickness:0.#})" : "OFF");
 
-                ImGui.TableSetColumnIndex(8);
+                ImGui.TableSetColumnIndex(9);
                 ImGui.Text(trigger.EnableTextFadeIn ? $"ON({trigger.TextFadeInSeconds:0.##})" : "OFF");
 
-                ImGui.TableSetColumnIndex(9);
+                ImGui.TableSetColumnIndex(10);
                 ImGui.Text($"{trigger.PositionX:0} / {trigger.PositionY:0}");
 
-                ImGui.TableSetColumnIndex(10);
+                ImGui.TableSetColumnIndex(11);
                 ImGui.Text($"{trigger.WaitSeconds:0.0}/{trigger.DisplaySeconds:0.0}");
                 if (ImGui.IsItemHovered())
                 {
                     ImGui.SetTooltip($"待機時間: {trigger.WaitSeconds:0.0}秒 / 表示時間: {trigger.DisplaySeconds:0.0}秒");
                 }
 
-                ImGui.TableSetColumnIndex(11);
+                ImGui.TableSetColumnIndex(12);
                 this.DrawListOperationButtons(i, TriggerListKind.Text, trigger);
             }
 
@@ -839,7 +926,7 @@ public sealed class HappyTriggerWindow : Window
 
         var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("HappyTriggerFfxivLogTriggerTable", 12, tableFlags))
+        if (ImGui.BeginTable("HappyTriggerFfxivLogTriggerTable", 13, tableFlags))
         {
             ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 50.0f);
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 80.0f);
@@ -852,6 +939,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("X/Y", ImGuiTableColumnFlags.WidthFixed, 120.0f);
             ImGui.TableSetupColumn("倍率/サイズ", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("待機/表示", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("残り時間", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableHeadersRow();
 
@@ -908,6 +996,11 @@ public sealed class HappyTriggerWindow : Window
                 }
 
                 ImGui.TableSetColumnIndex(11);
+                ImGui.TextUnformatted(trigger.EnableStatusRemainingAppend
+                    ? $"{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName}"
+                    : "OFF");
+
+                ImGui.TableSetColumnIndex(12);
                 this.DrawListOperationButtons(i, TriggerListKind.FfxivLog, trigger);
             }
 
@@ -976,6 +1069,18 @@ public sealed class HappyTriggerWindow : Window
         }
     }
 
+    private static string GetTextFontDesignLabel(TextFontDesign design)
+    {
+        return design switch
+        {
+            TextFontDesign.Bold => "太字",
+            TextFontDesign.Shadow => "影付き",
+            TextFontDesign.StrongOutline => "黒縁強調",
+            TextFontDesign.Neon => "ネオン風",
+            _ => "標準",
+        };
+    }
+
     private void DrawFfxivLogTab()
     {
         ImGui.Spacing();
@@ -997,19 +1102,45 @@ public sealed class HappyTriggerWindow : Window
         var battleHeight = Math.Max(160.0f, availableHeight * 0.48f);
         var internalHeight = Math.Max(160.0f, availableHeight - battleHeight - 48.0f);
 
-        this.DrawLogBox("バトルログ", "HappyTriggerBattleLogChild", this.getBattleLogs(), battleHeight, this.autoScrollBattleLog, ref this.selectedBattleLogIndex);
+        this.DrawLogBox("バトルログ", "HappyTriggerBattleLogChild", this.getBattleLogs(), battleHeight, this.autoScrollBattleLog, ref this.selectedBattleLogIndex, ref this.battleLogSearchText);
         ImGui.Spacing();
-        this.DrawLogBox("内部ログ", "HappyTriggerInternalLogChild", this.getInternalLogs(), internalHeight, this.autoScrollInternalLog, ref this.selectedInternalLogIndex);
+        this.DrawLogBox("内部ログ", "HappyTriggerInternalLogChild", this.getInternalLogs(), internalHeight, this.autoScrollInternalLog, ref this.selectedInternalLogIndex, ref this.internalLogSearchText);
     }
 
-    private void DrawLogBox(string title, string childId, IReadOnlyList<FfxivLogEntry> logs, float height, bool autoScroll, ref int selectedIndex)
+    private void DrawLogBox(
+        string title,
+        string childId,
+        IReadOnlyList<FfxivLogEntry> logs,
+        float height,
+        bool autoScroll,
+        ref int selectedIndex,
+        ref string searchText)
     {
         ImGui.Text(title);
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("検索:");
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(320.0f);
+        if (ImGui.InputText($"##{childId}_search", ref searchText, 512))
+        {
+            searchText = RemoveLineBreaks(searchText);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"クリア##{childId}_search_clear"))
+        {
+            searchText = string.Empty;
+        }
 
         if (selectedIndex >= logs.Count)
         {
             selectedIndex = -1;
         }
+
+        var filteredLogIndexes = GetFilteredLogIndexes(logs, searchText);
+        var hasSearchText = !string.IsNullOrWhiteSpace(searchText);
 
         if (selectedIndex >= 0 && selectedIndex < logs.Count)
         {
@@ -1019,35 +1150,37 @@ public sealed class HappyTriggerWindow : Window
             {
                 ImGui.SetClipboardText(logs[selectedIndex].DisplayText);
             }
+        }
 
-            ImGui.SameLine();
-            ImGui.TextDisabled("行をクリックで選択、ダブルクリックでコピーできます。");
-        }
-        else
-        {
-            ImGui.SameLine();
-            ImGui.TextDisabled("行をクリックで選択、ダブルクリックでコピーできます。");
-        }
+        ImGui.TextDisabled(hasSearchText
+            ? $"検索結果: {filteredLogIndexes.Count} / {logs.Count} 件。行をクリックで選択、ダブルクリックでコピーできます。"
+            : "行をクリックで選択、ダブルクリックでコピーできます。");
+
+        var logBoxHeight = Math.Min(height, CalculateLogBoxHeight(MaxVisibleLogRows));
 
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.28f, 0.30f, 0.28f, 0.96f));
-        ImGui.BeginChild(childId, new Vector2(-1.0f, height), true, ImGuiWindowFlags.HorizontalScrollbar);
+        ImGui.BeginChild(childId, new Vector2(-1.0f, logBoxHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
 
         if (logs.Count == 0)
         {
             selectedIndex = -1;
             ImGui.TextDisabled("ログはまだありません。");
         }
+        else if (filteredLogIndexes.Count == 0)
+        {
+            ImGui.TextDisabled("検索条件に一致するログはありません。");
+        }
         else
         {
-            for (var i = 0; i < logs.Count; i++)
+            foreach (var logIndex in filteredLogIndexes)
             {
-                var log = logs[i];
-                var selected = selectedIndex == i;
+                var log = logs[logIndex];
+                var selected = selectedIndex == logIndex;
 
-                ImGui.PushID($"{childId}_{i}");
+                ImGui.PushID($"{childId}_{logIndex}");
                 if (ImGui.Selectable(log.DisplayText, selected))
                 {
-                    selectedIndex = i;
+                    selectedIndex = logIndex;
 
                     if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                     {
@@ -1058,7 +1191,7 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.PopID();
             }
 
-            if (autoScroll && ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 24.0f)
+            if (!hasSearchText && autoScroll && ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 24.0f)
             {
                 ImGui.SetScrollHereY(1.0f);
             }
@@ -1066,6 +1199,31 @@ public sealed class HappyTriggerWindow : Window
 
         ImGui.EndChild();
         ImGui.PopStyleColor();
+    }
+
+
+    private static float CalculateLogBoxHeight(int maxRows)
+    {
+        var rowHeight = ImGui.GetTextLineHeightWithSpacing();
+        var paddingY = ImGui.GetStyle().WindowPadding.Y * 2.0f;
+        return Math.Max(120.0f, (rowHeight * maxRows) + paddingY);
+    }
+
+    private static List<int> GetFilteredLogIndexes(IReadOnlyList<FfxivLogEntry> logs, string searchText)
+    {
+        var results = new List<int>();
+        var normalizedSearchText = searchText?.Trim() ?? string.Empty;
+
+        for (var i = 0; i < logs.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedSearchText)
+                || logs[i].DisplayText.Contains(normalizedSearchText, StringComparison.OrdinalIgnoreCase))
+            {
+                results.Add(i);
+            }
+        }
+
+        return results;
     }
 
     private void SelectLocalImageFile()
