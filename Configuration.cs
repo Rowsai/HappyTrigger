@@ -16,6 +16,9 @@ public sealed class Configuration : IPluginConfiguration
     // 新規追加のテキスト表示用トリガーです。
     public List<HappyTriggerSetting> TextTriggers { get; set; } = new();
 
+    // FFXIV Logタブに出力されたバトルログ / 内部ログを参照するトリガーです。
+    public List<HappyTriggerSetting> FfxivLogTriggers { get; set; } = new();
+
     public void Save()
     {
         Plugin.PluginInterface.SavePluginConfig(this);

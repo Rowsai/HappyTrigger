@@ -17,5 +17,5 @@ public sealed class FfxivLogEntry
 
     public string Text { get; }
 
-    public string DisplayText => $"[{this.Timestamp:HH:mm:ss}] [{this.Category}] {this.Text}";
+    public string DisplayText => $"[{this.Timestamp:HH:mm:ss}][{this.Category}]{this.Text}";
 }

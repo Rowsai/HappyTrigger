@@ -5,11 +5,15 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
+using Dalamud.Game.ClientState.Objects;
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using LuminaAction = Lumina.Excel.Sheets.Action;
 
 namespace HappyTrigger;
 
@@ -17,6 +21,7 @@ public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/happytrigger";
     private const int MaxLogEntries = 500;
+    private const double FfxivLogReferencePairWindowSeconds = 10.0;
 
     [PluginService]
     internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
@@ -26,6 +31,12 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static IChatGui ChatGui { get; private set; } = null!;
+
+    [PluginService]
+    internal static IObjectTable ObjectTable { get; private set; } = null!;
+
+    [PluginService]
+    internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
     internal static ITextureProvider TextureProvider { get; private set; } = null!;
@@ -41,6 +52,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly List<FfxivLogEntry> battleLogs = new();
     private readonly List<FfxivLogEntry> internalLogs = new();
     private readonly object logLock = new();
+    private readonly HashSet<string> activeEnemyCastingLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FfxivLogReferenceMatchState> ffxivLogReferenceMatchStates = new(StringComparer.OrdinalIgnoreCase);
 
     public Plugin()
     {
@@ -55,13 +68,24 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var trigger in this.configuration.TextTriggers)
         {
             trigger.DisplayTextMode = true;
+            trigger.UseFfxivLogReference = false;
+        }
+
+        foreach (var trigger in this.configuration.FfxivLogTriggers)
+        {
+            trigger.UseFfxivLogReference = true;
+        }
+
+        if (this.EnsureTriggerIds())
+        {
+            this.SaveConfig();
         }
 
         this.imageCacheService = new ImageCacheService(TextureProvider);
         this.configWindow = new HappyTriggerWindow(
             this.configuration,
             this.SaveConfig,
-            this.ActivatePopup,
+            trigger => this.ActivatePopup(trigger, true),
             this.ActivatePositionSettingTrigger,
             this.ClosePositionSettingPopup,
             this.GetBattleLogsSnapshot,
@@ -81,6 +105,89 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.ChatMessage += this.OnChatMessage;
 
         this.AddInternalLog("HappyTrigger loaded.");
+    }
+
+    private bool EnsureTriggerIds()
+    {
+        var changed = false;
+        var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var trigger in this.configuration.Triggers)
+        {
+            trigger.DisplayTextMode = false;
+            changed |= EnsureTriggerId(trigger, "I", usedIds);
+        }
+
+        foreach (var trigger in this.configuration.TextTriggers)
+        {
+            trigger.DisplayTextMode = true;
+            trigger.UseFfxivLogReference = false;
+            changed |= EnsureTriggerId(trigger, "T", usedIds);
+        }
+
+        foreach (var trigger in this.configuration.FfxivLogTriggers)
+        {
+            trigger.UseFfxivLogReference = true;
+            var beforeInternalLogKeywords = string.Join("\n", trigger.GetInternalLogKeywords());
+            trigger.NormalizeInternalLogKeywords();
+            changed |= !string.Equals(beforeInternalLogKeywords, string.Join("\n", trigger.GetInternalLogKeywords()), StringComparison.Ordinal);
+            changed |= EnsureTriggerId(trigger, trigger.UsePrerequisite ? "X" : "F", usedIds);
+        }
+
+        return changed;
+    }
+
+    private bool EnsureTriggerId(HappyTriggerSetting trigger, string prefix, HashSet<string> usedIds)
+    {
+        var changed = false;
+
+        if (!HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, prefix) || usedIds.Contains(trigger.TriggerId))
+        {
+            trigger.TriggerId = this.GenerateNextTriggerId(prefix, usedIds);
+            changed = true;
+        }
+
+        usedIds.Add(trigger.TriggerId);
+        return changed;
+    }
+
+    private string GenerateNextTriggerId(string prefix, HashSet<string> usedIds)
+    {
+        var maxNumber = 0;
+
+        foreach (var trigger in this.configuration.Triggers)
+        {
+            if (HappyTriggerSetting.TryGetTriggerIdNumber(trigger.TriggerId, prefix, out var number))
+            {
+                maxNumber = Math.Max(maxNumber, number);
+            }
+        }
+
+        foreach (var trigger in this.configuration.TextTriggers)
+        {
+            if (HappyTriggerSetting.TryGetTriggerIdNumber(trigger.TriggerId, prefix, out var number))
+            {
+                maxNumber = Math.Max(maxNumber, number);
+            }
+        }
+
+        foreach (var trigger in this.configuration.FfxivLogTriggers)
+        {
+            if (HappyTriggerSetting.TryGetTriggerIdNumber(trigger.TriggerId, prefix, out var number))
+            {
+                maxNumber = Math.Max(maxNumber, number);
+            }
+        }
+
+        string nextId;
+        do
+        {
+            maxNumber++;
+            nextId = HappyTriggerSetting.FormatTriggerId(prefix, maxNumber);
+        }
+        while (usedIds.Contains(nextId));
+
+        return nextId;
     }
 
     private void OnCommand(string command, string args)
@@ -108,7 +215,8 @@ public sealed class Plugin : IDalamudPlugin
             ? text
             : $"{sender}: {text}";
 
-        this.AddBattleLog(chatType, logText);
+        var battleLogEntry = this.AddBattleLog(chatType, logText);
+        this.EvaluateBattleLogReferenceTriggers(battleLogEntry);
 
         foreach (var trigger in this.configuration.Triggers)
         {
@@ -133,27 +241,302 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void AddBattleLog(string category, string text)
+    private FfxivLogEntry AddBattleLog(string category, string text)
     {
-        this.AddLogEntry(this.battleLogs, category, text);
+        return this.AddLogEntry(this.battleLogs, category, text);
     }
 
-    private void AddInternalLog(string text)
+    private FfxivLogEntry AddInternalLog(string text, bool evaluateFfxivLogTriggers = true)
     {
-        this.AddLogEntry(this.internalLogs, "HappyTrigger", text);
+        var logEntry = this.AddLogEntry(this.internalLogs, "HappyTrigger", text);
+
+        if (evaluateFfxivLogTriggers)
+        {
+            this.EvaluateInternalLogReferenceTriggers(logEntry);
+        }
+
+        return logEntry;
     }
 
-    private void AddLogEntry(List<FfxivLogEntry> target, string category, string text)
+    private FfxivLogEntry AddLogEntry(List<FfxivLogEntry> target, string category, string text)
     {
+        var logEntry = new FfxivLogEntry(DateTime.Now, category, text);
+
         lock (this.logLock)
         {
-            target.Add(new FfxivLogEntry(DateTime.Now, category, text));
+            target.Add(logEntry);
 
             if (target.Count > MaxLogEntries)
             {
                 target.RemoveRange(0, target.Count - MaxLogEntries);
             }
         }
+
+        return logEntry;
+    }
+
+    private void EvaluateBattleLogReferenceTriggers(FfxivLogEntry logEntry)
+    {
+        foreach (var trigger in this.configuration.FfxivLogTriggers)
+        {
+            trigger.UseFfxivLogReference = true;
+
+            // バトルログ欄が空の場合は、バトルログでは判定しません。
+            if (!trigger.IsBattleLogReferenceMatch(logEntry))
+            {
+                continue;
+            }
+
+            this.HandleFfxivLogReferenceMatched(trigger, FfxivLogReferenceSource.BattleLog, logEntry);
+        }
+    }
+
+    private void EvaluateInternalLogReferenceTriggers(FfxivLogEntry logEntry)
+    {
+        foreach (var trigger in this.configuration.FfxivLogTriggers)
+        {
+            trigger.UseFfxivLogReference = true;
+
+            var internalLogKeywords = trigger.GetInternalLogKeywords();
+            for (var i = 0; i < internalLogKeywords.Count; i++)
+            {
+                if (!trigger.IsInternalLogReferenceMatch(logEntry, i))
+                {
+                    continue;
+                }
+
+                this.HandleFfxivLogReferenceMatched(trigger, FfxivLogReferenceSource.InternalLog, logEntry, i);
+            }
+        }
+    }
+
+    private void HandleFfxivLogReferenceMatched(
+        HappyTriggerSetting trigger,
+        FfxivLogReferenceSource source,
+        FfxivLogEntry logEntry,
+        int internalLogKeywordIndex = -1)
+    {
+        var requiresBattleLog = !string.IsNullOrWhiteSpace(trigger.BattleLogKeyword);
+        var requiredInternalLogCount = trigger.GetInternalLogKeywords().Count;
+
+        if (!requiresBattleLog && requiredInternalLogCount == 0)
+        {
+            return;
+        }
+
+        if (trigger.UsePrerequisite && !this.HasActivePrerequisiteTrigger(trigger))
+        {
+            this.ResetFfxivLogReferenceMatchState(trigger);
+            return;
+        }
+
+        // バトルログだけの条件は、バトルログに表示されたタイミングで即発火します。
+        if (requiresBattleLog && requiredInternalLogCount == 0)
+        {
+            this.FireFfxivLogReferenceTrigger(trigger, source);
+            return;
+        }
+
+        // 内部ログ1つだけ、かつバトルログ条件なしの場合は、内部ログに表示されたタイミングで即発火します。
+        if (!requiresBattleLog && requiredInternalLogCount == 1)
+        {
+            this.FireFfxivLogReferenceTrigger(trigger, source);
+            return;
+        }
+
+        // バトルログ + 内部ログ、または複数内部ログの場合は、
+        // 条件ごとのマッチ情報を保持し、すべて揃った場合だけ発火します。
+        // 内部ログが複数ある場合は「内部ログ1 → 内部ログ2 → ...」の順番でだけ進行します。
+        var state = this.GetFfxivLogReferenceMatchState(trigger);
+        this.RemoveExpiredFfxivLogReferenceMatches(state);
+
+        if (source == FfxivLogReferenceSource.BattleLog)
+        {
+            state.BattleLogMatchedAtUtc = logEntry.Timestamp.ToUniversalTime();
+        }
+        else if (internalLogKeywordIndex >= 0)
+        {
+            if (!this.TryRecordSequentialInternalLogMatch(trigger, state, internalLogKeywordIndex, logEntry))
+            {
+                return;
+            }
+        }
+
+        if (!this.IsFfxivLogReferencePairSatisfied(trigger, state))
+        {
+            return;
+        }
+
+        this.FireFfxivLogReferenceTrigger(trigger, FfxivLogReferenceSource.All);
+        this.ResetFfxivLogReferenceMatchState(trigger);
+    }
+
+    private bool TryRecordSequentialInternalLogMatch(
+        HappyTriggerSetting trigger,
+        FfxivLogReferenceMatchState state,
+        int matchedIndex,
+        FfxivLogEntry logEntry)
+    {
+        var requiredInternalLogCount = trigger.GetInternalLogKeywords().Count;
+        if (requiredInternalLogCount == 0 || matchedIndex < 0 || matchedIndex >= requiredInternalLogCount)
+        {
+            return false;
+        }
+
+        var expectedIndex = GetNextRequiredInternalLogIndex(state, requiredInternalLogCount);
+
+        if (matchedIndex != expectedIndex)
+        {
+            // 内部ログ1が再度マッチした場合は、新しい組み合わせの開始として扱います。
+            // 例: 内部ログ1 → 別ログ → 内部ログ1 → 内部ログ2 のようなケースで、後半の組み合わせを拾えます。
+            if (matchedIndex != 0)
+            {
+                return false;
+            }
+
+            state.InternalLogMatchedAtUtcByIndex.Clear();
+            expectedIndex = 0;
+        }
+
+        state.InternalLogMatchedAtUtcByIndex[expectedIndex] = logEntry.Timestamp.ToUniversalTime();
+        return true;
+    }
+
+    private static int GetNextRequiredInternalLogIndex(
+        FfxivLogReferenceMatchState state,
+        int requiredInternalLogCount)
+    {
+        for (var i = 0; i < requiredInternalLogCount; i++)
+        {
+            if (!state.InternalLogMatchedAtUtcByIndex.ContainsKey(i))
+            {
+                return i;
+            }
+        }
+
+        return requiredInternalLogCount;
+    }
+
+    private void RemoveExpiredFfxivLogReferenceMatches(FfxivLogReferenceMatchState state)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (state.BattleLogMatchedAtUtc != null &&
+            (nowUtc - state.BattleLogMatchedAtUtc.Value).TotalSeconds > FfxivLogReferencePairWindowSeconds)
+        {
+            state.BattleLogMatchedAtUtc = null;
+        }
+
+        var expiredInternalIndexes = state.InternalLogMatchedAtUtcByIndex
+            .Where(pair => (nowUtc - pair.Value).TotalSeconds > FfxivLogReferencePairWindowSeconds)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        if (expiredInternalIndexes.Count == 0)
+        {
+            return;
+        }
+
+        // 途中の内部ログが期限切れになった場合、順序保証のため内部ログ側の保持情報はすべてリセットします。
+        state.InternalLogMatchedAtUtcByIndex.Clear();
+    }
+
+    private FfxivLogReferenceMatchState GetFfxivLogReferenceMatchState(HappyTriggerSetting trigger)
+    {
+        var key = this.GetFfxivLogReferenceStateKey(trigger);
+
+        if (!this.ffxivLogReferenceMatchStates.TryGetValue(key, out var state))
+        {
+            state = new FfxivLogReferenceMatchState();
+            this.ffxivLogReferenceMatchStates[key] = state;
+        }
+
+        return state;
+    }
+
+    private bool IsFfxivLogReferencePairSatisfied(HappyTriggerSetting trigger, FfxivLogReferenceMatchState state)
+    {
+        var requiresBattleLog = !string.IsNullOrWhiteSpace(trigger.BattleLogKeyword);
+        var requiredInternalLogCount = trigger.GetInternalLogKeywords().Count;
+        var matchedTimes = new List<DateTime>();
+
+        if (requiresBattleLog)
+        {
+            if (state.BattleLogMatchedAtUtc == null)
+            {
+                return false;
+            }
+
+            matchedTimes.Add(state.BattleLogMatchedAtUtc.Value);
+        }
+
+        for (var i = 0; i < requiredInternalLogCount; i++)
+        {
+            if (!state.InternalLogMatchedAtUtcByIndex.TryGetValue(i, out var matchedAtUtc))
+            {
+                return false;
+            }
+
+            matchedTimes.Add(matchedAtUtc);
+        }
+
+        if (matchedTimes.Count == 0)
+        {
+            return false;
+        }
+
+        var earliest = matchedTimes.Min();
+        var latest = matchedTimes.Max();
+        return (latest - earliest).TotalSeconds <= FfxivLogReferencePairWindowSeconds;
+    }
+
+    private void ResetFfxivLogReferenceMatchState(HappyTriggerSetting trigger)
+    {
+        this.ffxivLogReferenceMatchStates.Remove(this.GetFfxivLogReferenceStateKey(trigger));
+    }
+
+    private string GetFfxivLogReferenceStateKey(HappyTriggerSetting trigger)
+    {
+        if (!string.IsNullOrWhiteSpace(trigger.TriggerId))
+        {
+            return trigger.TriggerId;
+        }
+
+        return $"{trigger.BattleLogKeyword}::{string.Join("|", trigger.GetInternalLogKeywords())}::{trigger.DisplayTextMode}";
+    }
+
+    private bool HasActivePrerequisiteTrigger(HappyTriggerSetting trigger)
+    {
+        if (string.IsNullOrWhiteSpace(trigger.PrerequisiteTriggerId))
+        {
+            return false;
+        }
+
+        this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
+
+        foreach (var popup in this.activePopups)
+        {
+            if (popup.IsPositionSetting || !popup.IsReadyToDisplay || popup.IsExpired || popup.IsClosed)
+            {
+                continue;
+            }
+
+            var prerequisiteTrigger = popup.Trigger;
+            if (string.Equals(prerequisiteTrigger.TriggerId, trigger.PrerequisiteTriggerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void FireFfxivLogReferenceTrigger(HappyTriggerSetting trigger, FfxivLogReferenceSource source)
+    {
+        this.AddInternalLog(
+            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}'",
+            false);
+        this.ActivatePopup(trigger, false);
     }
 
     private IReadOnlyList<FfxivLogEntry> GetBattleLogsSnapshot()
@@ -180,10 +563,11 @@ public sealed class Plugin : IDalamudPlugin
             this.internalLogs.Clear();
         }
 
+        this.ffxivLogReferenceMatchStates.Clear();
         this.AddInternalLog("FFXIV Log cleared.");
     }
 
-    private void ActivatePopup(HappyTriggerSetting trigger)
+    private void ActivatePopup(HappyTriggerSetting trigger, bool writeInternalLog = true)
     {
         if (trigger.DisplayTextMode)
         {
@@ -195,7 +579,11 @@ public sealed class Plugin : IDalamudPlugin
             trigger.DisplayTextMode = true;
             this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
             this.activePopups.Add(new PopupImageState(trigger));
-            this.AddInternalLog($"Text displayed. Text='{trigger.DisplayText}', X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
+            if (writeInternalLog)
+            {
+                this.AddInternalLog($"Text display queued. Text='{trigger.DisplayText}', Wait={Math.Clamp(trigger.WaitSeconds, 0.0f, 600.0f):0.##}s, X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
+            }
+
             return;
         }
 
@@ -207,7 +595,10 @@ public sealed class Plugin : IDalamudPlugin
         trigger.DisplayTextMode = false;
         this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
         this.activePopups.Add(new PopupImageState(trigger));
-        this.AddInternalLog($"Image displayed. Image='{trigger.ImagePath}', X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
+        if (writeInternalLog)
+        {
+            this.AddInternalLog($"Image display queued. Image='{trigger.ImagePath}', Wait={Math.Clamp(trigger.WaitSeconds, 0.0f, 600.0f):0.##}s, X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
+        }
     }
 
     private void ActivatePositionSettingTrigger(HappyTriggerSetting trigger)
@@ -239,8 +630,125 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Draw()
     {
+        this.UpdateEnemyCastingInternalLogs();
         this.windowSystem.Draw();
         this.DrawActivePopups();
+    }
+
+    private void UpdateEnemyCastingInternalLogs()
+    {
+        try
+        {
+            var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var battleChara in GetEnemyBattleCharas())
+            {
+                if (!battleChara.IsCasting)
+                {
+                    continue;
+                }
+
+                var enemyName = battleChara.Name.TextValue;
+                var entityId = battleChara.EntityId;
+                var actionId = battleChara.CastActionId;
+                var actionName = GetActionName(actionId);
+                var totalCast = battleChara.TotalCastTime;
+                var statuses = battleChara.StatusList;
+                var hasStatus = false;
+
+                for (var i = 0; i < statuses.Length; i++)
+                {
+                    var status = statuses[i];
+
+                    if (status == null || status.StatusId == 0)
+                    {
+                        continue;
+                    }
+
+                    hasStatus = true;
+                    var key = $"{entityId}:{actionId}:{totalCast:0.00}:{status.StatusId}:{status.Param}:{i}";
+                    currentKeys.Add(key);
+
+                    if (this.activeEnemyCastingLogKeys.Add(key))
+                    {
+                        this.AddEnemyCastingInternalLog(
+                            enemyName,
+                            actionId,
+                            actionName,
+                            totalCast,
+                            status.StatusId.ToString(),
+                            status.Param.ToString());
+                    }
+                }
+
+                if (!hasStatus)
+                {
+                    var key = $"{entityId}:{actionId}:{totalCast:0.00}:NoStatus";
+                    currentKeys.Add(key);
+
+                    if (this.activeEnemyCastingLogKeys.Add(key))
+                    {
+                        this.AddEnemyCastingInternalLog(
+                            enemyName,
+                            actionId,
+                            actionName,
+                            totalCast,
+                            "-",
+                            "-");
+                    }
+                }
+            }
+
+            this.activeEnemyCastingLogKeys.RemoveWhere(key => !currentKeys.Contains(key));
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Failed to update enemy casting internal logs.");
+        }
+    }
+
+    private void AddEnemyCastingInternalLog(
+        string enemyName,
+        uint actionId,
+        string actionName,
+        float castTotal,
+        string statusId,
+        string param)
+    {
+        this.AddInternalLog($"EnemyCasting Infonmation. Enemy={enemyName} ActionId={actionId} ActionName={actionName} CastTotal={castTotal:0.00}s StatusId={statusId} Param={param}");
+    }
+
+    private static string GetActionName(uint actionId)
+    {
+        if (actionId == 0)
+        {
+            return "-";
+        }
+
+        try
+        {
+            var actionSheet = DataManager.GetExcelSheet<LuminaAction>();
+            var action = actionSheet.GetRow(actionId);
+            var actionName = action.Name.ExtractText();
+            return string.IsNullOrWhiteSpace(actionName) ? "-" : actionName;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, $"Failed to get action name. ActionId={actionId}");
+            return "-";
+        }
+    }
+
+    private static List<IBattleChara> GetEnemyBattleCharas()
+    {
+        return ObjectTable
+            .Where(obj => obj is IBattleChara)
+            .Cast<IBattleChara>()
+            .Where(battleChara => battleChara.ObjectKind == ObjectKind.BattleNpc)
+            .Where(battleChara => !string.IsNullOrWhiteSpace(battleChara.Name.TextValue))
+            .OrderBy(battleChara => battleChara.Name.TextValue, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(battleChara => battleChara.EntityId)
+            .ToList();
     }
 
     private void DrawActivePopups()
@@ -250,6 +758,11 @@ public sealed class Plugin : IDalamudPlugin
         for (var i = 0; i < this.activePopups.Count; i++)
         {
             var popup = this.activePopups[i];
+            if (!popup.IsReadyToDisplay)
+            {
+                continue;
+            }
+
             var trigger = popup.Trigger;
 
             if (trigger.DisplayTextMode)
@@ -466,6 +979,22 @@ public sealed class Plugin : IDalamudPlugin
         {
             popup.PositionChanged = false;
         }
+    }
+
+
+    private enum FfxivLogReferenceSource
+    {
+        BattleLog,
+        InternalLog,
+        Both,
+        All,
+    }
+
+    private sealed class FfxivLogReferenceMatchState
+    {
+        public DateTime? BattleLogMatchedAtUtc { get; set; }
+
+        public Dictionary<int, DateTime> InternalLogMatchedAtUtcByIndex { get; } = new();
     }
 
     public void Dispose()
