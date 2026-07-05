@@ -19,6 +19,10 @@ public sealed class Configuration : IPluginConfiguration
     // FFXIV Logタブに出力されたバトルログ / 内部ログを参照するトリガーです。
     public List<HappyTriggerSetting> FfxivLogTriggers { get; set; } = new();
 
+    // FFXIV Log参照トリガーのマッチ状態デバッグログを内部ログに表示するかどうかです。
+    // OFFの場合も判定自体は行いますが、デバッグログは出力しません。
+    public bool ShowFfxivLogReferenceDebugLogs { get; set; } = false;
+
     // トリガー管理用のボックスです。IDは BOX001, BOX002 ... の形式です。
     public List<TriggerBoxSetting> TriggerBoxes { get; set; } = new();
 

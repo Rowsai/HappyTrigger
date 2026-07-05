@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace HappyTrigger;
 
@@ -232,6 +233,40 @@ public sealed class HappyTriggerSetting
         };
     }
 
+    public static bool IsValidManualTriggerId(string? triggerId)
+    {
+        if (string.IsNullOrWhiteSpace(triggerId))
+        {
+            return false;
+        }
+
+        var trimmedId = triggerId.Trim();
+        if (trimmedId.Length == 0 || trimmedId.Length > 6)
+        {
+            return false;
+        }
+
+        foreach (var c in trimmedId)
+        {
+            var isAsciiDigit = c >= '0' && c <= '9';
+            var isAsciiUpper = c >= 'A' && c <= 'Z';
+            var isAsciiLower = c >= 'a' && c <= 'z';
+            if (!isAsciiDigit && !isAsciiUpper && !isAsciiLower)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static bool IsValidFfxivLogTriggerId(string? triggerId)
+    {
+        return IsValidTriggerId(triggerId, "F")
+            || IsValidTriggerId(triggerId, "X")
+            || IsValidManualTriggerId(triggerId);
+    }
+
     public static bool IsValidTriggerId(string? triggerId, string prefix)
     {
         return TryGetTriggerIdNumber(triggerId, prefix, out _);
@@ -444,9 +479,125 @@ public sealed class HappyTriggerSetting
         }
 
         // FFXIV Logタブ上の表示文字列でも、ログ本文だけでもヒットできるようにします。
-        // 完全一致の場合はログ本文の完全一致が主用途です。
-        return this.IsTextMatched(logEntry.Text, conditionText)
-            || this.IsTextMatched(logEntry.DisplayText, conditionText);
+        // ログ側・条件側の両方から [19:42:52] のような先頭タイムスタンプを外した候補も作ります。
+        // そのため、条件にタイムスタンプが混ざっていても、実ログ側の時刻に依存せず一致できます。
+        // また、[Chat] / [HappyTrigger] などのカテゴリ付き・カテゴリなしのどちらでも一致できるようにします。
+        var targetCandidates = GetLogTextMatchCandidates(logEntry).ToList();
+        var conditionCandidates = GetLogConditionMatchCandidates(conditionText).ToList();
+
+        foreach (var targetCandidate in targetCandidates)
+        {
+            foreach (var conditionCandidate in conditionCandidates)
+            {
+                if (this.IsTextMatched(targetCandidate, conditionCandidate))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> GetLogTextMatchCandidates(FfxivLogEntry logEntry)
+    {
+        foreach (var candidate in ExpandLogMatchCandidates(logEntry.Text))
+        {
+            yield return candidate;
+        }
+
+        foreach (var candidate in ExpandLogMatchCandidates(logEntry.DisplayText))
+        {
+            yield return candidate;
+        }
+    }
+
+    private static IEnumerable<string> GetLogConditionMatchCandidates(string conditionText)
+    {
+        foreach (var candidate in ExpandLogMatchCandidates(conditionText))
+        {
+            yield return candidate;
+        }
+    }
+
+    private static IEnumerable<string> ExpandLogMatchCandidates(string value)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var candidates = new List<string>();
+
+        void Add(string candidate)
+        {
+            candidate = (candidate ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(candidate) && seen.Add(candidate))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        var raw = (value ?? string.Empty).Trim();
+        var withoutTimestamp = StripLeadingTimestamp(raw);
+        var withoutCategory = StripLeadingCategory(withoutTimestamp);
+
+        Add(raw);
+        Add(withoutTimestamp);
+        Add(withoutCategory);
+
+        foreach (var candidate in candidates)
+        {
+            yield return candidate;
+        }
+    }
+
+    private static string StripLeadingTimestamp(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+
+        // [HH:mm:ss] の10文字を想定します。
+        if (trimmed.Length >= 10 &&
+            trimmed[0] == '[' &&
+            char.IsDigit(trimmed[1]) &&
+            char.IsDigit(trimmed[2]) &&
+            trimmed[3] == ':' &&
+            char.IsDigit(trimmed[4]) &&
+            char.IsDigit(trimmed[5]) &&
+            trimmed[6] == ':' &&
+            char.IsDigit(trimmed[7]) &&
+            char.IsDigit(trimmed[8]) &&
+            trimmed[9] == ']')
+        {
+            return trimmed[10..].TrimStart();
+        }
+
+        return trimmed;
+    }
+
+    private static string StripLeadingCategory(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+
+        // [Chat] / [HappyTrigger] のような先頭カテゴリを外します。
+        // [19:42:52] は StripLeadingTimestamp で先に外す想定です。
+        if (trimmed.Length >= 3 && trimmed[0] == '[')
+        {
+            var closeIndex = trimmed.IndexOf(']');
+            if (closeIndex > 0 && closeIndex + 1 < trimmed.Length)
+            {
+                return trimmed[(closeIndex + 1)..].TrimStart();
+            }
+        }
+
+        return trimmed;
     }
 
     private bool IsTextMatched(string targetText, string conditionText)
@@ -461,11 +612,31 @@ public sealed class HappyTriggerSetting
             return false;
         }
 
+        var normalizedTargetText = NormalizeRemainingForMatch(targetText.Trim());
+        var normalizedConditionText = NormalizeRemainingForMatch(conditionText.Trim());
+
         if (this.ExactMatch)
         {
-            return string.Equals(targetText.Trim(), conditionText.Trim(), StringComparison.OrdinalIgnoreCase);
+            return string.Equals(normalizedTargetText, normalizedConditionText, StringComparison.OrdinalIgnoreCase);
         }
 
-        return targetText.Contains(conditionText, StringComparison.OrdinalIgnoreCase);
+        return normalizedTargetText.Contains(normalizedConditionText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRemainingForMatch(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        // ステータス残り時間ログは、登録時と実際の付与時で Remaining=xx.xx が必ず変動します。
+        // 条件側に Remaining=75.99s のような秒数つきログをそのまま貼っていても、
+        // 実ログ側の Remaining=42.99s と同じ条件として扱えるよう、秒数部分だけを判定対象から外します。
+        return Regex.Replace(
+            value,
+            @"\bRemaining\s*=\s*[^\s]+",
+            "Remaining=*",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }

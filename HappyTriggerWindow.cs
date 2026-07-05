@@ -87,6 +87,9 @@ public sealed class HappyTriggerWindow : Window
     private string triggerBoxExportMessage = string.Empty;
     private string importCsvPath = string.Empty;
     private string triggerImportMessage = string.Empty;
+    private string manualTriggerIdEditKey = string.Empty;
+    private string manualTriggerIdInput = string.Empty;
+    private string manualTriggerIdMessage = string.Empty;
 
     private HappyTriggerSetting editTrigger = new();
     private int editingIndex = -1;
@@ -432,7 +435,8 @@ public sealed class HappyTriggerWindow : Window
             }
 
             ImGui.SameLine();
-            ImGui.TextDisabled("例: PLD / WHM / RDM");
+            ImGui.TextDisabled("例: PLD / 複数指定: <PLD|DRK|WAR>");
+            ImGui.TextDisabled("Tips: 複数ジョブを対象にする場合は <PLD|DRK|WAR> のように | 区切りで指定します。");
 
             var statusName = RemoveLineBreaks(this.editTrigger.StatusRemainingStatusName ?? string.Empty);
             ImGui.SetNextItemWidth(360.0f);
@@ -442,6 +446,7 @@ public sealed class HappyTriggerWindow : Window
             }
 
             ImGui.TextDisabled("例: job=PLD StatusName=水属性圧縮 のログがある場合、表示テキスト末尾に 水属性圧縮（75.99s） のように表示し、表示開始後にカウントダウンします。");
+            ImGui.TextDisabled("例: ジョブ=<PLD|DRK|WAR> の場合、PLD/DRK/WAR のいずれかの MemberStatus ログでマッチします。");
         }
 
         ImGui.TextDisabled("保存時は 内部ログ1_@_内部ログ2_@_内部ログn の形式で保持します。編集時は _@_ で分割して各入力欄に戻します。");
@@ -1311,6 +1316,61 @@ public sealed class HappyTriggerWindow : Window
         }
     }
 
+    private void CopyTrigger(int index, TriggerListKind listKind)
+    {
+        HappyTriggerSetting copiedTrigger;
+        int copiedIndex;
+
+        if (listKind == TriggerListKind.FfxivLog)
+        {
+            if (index < 0 || index >= this.configuration.FfxivLogTriggers.Count)
+            {
+                return;
+            }
+
+            copiedTrigger = this.configuration.FfxivLogTriggers[index].Clone();
+            copiedTrigger.UseFfxivLogReference = true;
+            copiedTrigger.TriggerId = this.GenerateNextTriggerId(copiedTrigger.UsePrerequisite ? "X" : "F");
+            this.configuration.FfxivLogTriggers.Add(copiedTrigger);
+            copiedIndex = this.configuration.FfxivLogTriggers.Count - 1;
+        }
+        else if (listKind == TriggerListKind.Text)
+        {
+            if (index < 0 || index >= this.configuration.TextTriggers.Count)
+            {
+                return;
+            }
+
+            copiedTrigger = this.configuration.TextTriggers[index].Clone();
+            copiedTrigger.DisplayTextMode = true;
+            copiedTrigger.UseFfxivLogReference = false;
+            copiedTrigger.UsePrerequisite = false;
+            copiedTrigger.PrerequisiteTriggerId = string.Empty;
+            copiedTrigger.TriggerId = this.GenerateNextTriggerId("T");
+            this.configuration.TextTriggers.Add(copiedTrigger);
+            copiedIndex = this.configuration.TextTriggers.Count - 1;
+        }
+        else
+        {
+            if (index < 0 || index >= this.configuration.Triggers.Count)
+            {
+                return;
+            }
+
+            copiedTrigger = this.configuration.Triggers[index].Clone();
+            copiedTrigger.DisplayTextMode = false;
+            copiedTrigger.UseFfxivLogReference = false;
+            copiedTrigger.UsePrerequisite = false;
+            copiedTrigger.PrerequisiteTriggerId = string.Empty;
+            copiedTrigger.TriggerId = this.GenerateNextTriggerId("I");
+            this.configuration.Triggers.Add(copiedTrigger);
+            copiedIndex = this.configuration.Triggers.Count - 1;
+        }
+
+        this.selectedManagementTriggerKey = GetManagementTriggerKey(copiedTrigger, listKind, copiedIndex);
+        this.saveConfig();
+    }
+
     private void ClearSelectedManagementTriggerIfMatched(string deletedKey)
     {
         if (string.Equals(this.selectedManagementTriggerKey, deletedKey, StringComparison.OrdinalIgnoreCase))
@@ -1570,6 +1630,23 @@ public sealed class HappyTriggerWindow : Window
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(this.selectedManagementLabelBoxId))
+        {
+            ImGui.TextDisabled("トリガーボックスを選択すると、そのボックスに所属するトリガーラベルだけを表示します。");
+            return;
+        }
+
+        var visibleLabels = this.configuration.TriggerLabels
+            .Select((label, index) => new { Label = label, Index = index })
+            .Where(item => string.Equals(item.Label.BoxId, this.selectedManagementLabelBoxId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (visibleLabels.Count == 0)
+        {
+            ImGui.TextDisabled("選択中のトリガーボックスに所属するトリガーラベルはありません。");
+            return;
+        }
+
         if (ImGui.BeginTable("HappyTriggerLabelTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
@@ -1579,9 +1656,10 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableHeadersRow();
 
-            for (var i = 0; i < this.configuration.TriggerLabels.Count; i++)
+            foreach (var item in visibleLabels)
             {
-                var label = this.configuration.TriggerLabels[i];
+                var label = item.Label;
+                var i = item.Index;
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
@@ -1618,12 +1696,20 @@ public sealed class HappyTriggerWindow : Window
     private void DrawTriggerManagementTree()
     {
         ImGui.TextDisabled("ボックス、ラベル、トリガーの階層を確認できます。トリガーの所属はログトリガータブの管理設定で変更できます。");
-        ImGui.TextDisabled("トリガー名をクリックすると、保存済み設定の詳細を確認できます。各トリガーの右側からテスト・編集・削除もできます。");
+        ImGui.TextDisabled("トリガー名をクリックすると、保存済み設定の詳細を確認できます。各トリガーの右側からテスト・編集・コピー・削除もできます。");
         ImGui.TextDisabled("トリガーボックス右側の export ボタンで、そのボックス配下のトリガーをCSV出力できます。");
 
         if (!string.IsNullOrWhiteSpace(this.triggerBoxExportMessage))
         {
             ImGui.TextColored(new Vector4(1.0f, 0.92f, 0.25f, 1.0f), this.triggerBoxExportMessage);
+        }
+
+        if (!string.IsNullOrWhiteSpace(this.manualTriggerIdMessage))
+        {
+            var color = this.manualTriggerIdMessage.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+                ? new Vector4(1.0f, 0.35f, 0.35f, 1.0f)
+                : new Vector4(1.0f, 0.92f, 0.25f, 1.0f);
+            ImGui.TextColored(color, this.manualTriggerIdMessage);
         }
 
         ImGui.Separator();
@@ -2476,8 +2562,7 @@ public sealed class HappyTriggerWindow : Window
         }
         else
         {
-            var isValidFfxivLogId = HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "F")
-                || HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "X");
+            var isValidFfxivLogId = HappyTriggerSetting.IsValidFfxivLogTriggerId(trigger.TriggerId);
             if (!isValidFfxivLogId || !trigger.UseFfxivLogReference)
             {
                 throw new IllegalImportException("FFXIV Logトリガー情報が不正です。");
@@ -2668,10 +2753,32 @@ public sealed class HappyTriggerWindow : Window
         }
 
         ImGui.SameLine();
+        if (ImGui.SmallButton($"コピー##management_copy_{rowKey}"))
+        {
+            this.CopyTrigger(index, listKind);
+        }
+
+        if (listKind == TriggerListKind.FfxivLog)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"ID更新##management_id_update_{rowKey}"))
+            {
+                this.manualTriggerIdEditKey = rowKey;
+                this.manualTriggerIdInput = trigger.TriggerId ?? string.Empty;
+                this.manualTriggerIdMessage = "ログトリガーIDを半角英数字1〜6桁で入力してください。";
+            }
+        }
+
+        ImGui.SameLine();
         if (ImGui.SmallButton($"削除##management_delete_{rowKey}"))
         {
             this.DeleteTrigger(index, listKind);
             return true;
+        }
+
+        if (listKind == TriggerListKind.FfxivLog && string.Equals(this.manualTriggerIdEditKey, rowKey, StringComparison.OrdinalIgnoreCase))
+        {
+            this.DrawManualTriggerIdEditor(trigger, listKind, index, rowKey);
         }
 
         if (isSelected)
@@ -2680,6 +2787,102 @@ public sealed class HappyTriggerWindow : Window
         }
 
         return false;
+    }
+
+    private void DrawManualTriggerIdEditor(HappyTriggerSetting trigger, TriggerListKind listKind, int index, string oldRowKey)
+    {
+        ImGui.Indent(24.0f);
+        ImGui.TextDisabled("ログトリガーIDを手動更新します。使用できる文字は半角英数字のみ、最大6桁です。");
+
+        var newId = this.manualTriggerIdInput ?? string.Empty;
+        ImGui.SetNextItemWidth(220.0f);
+        if (InputTextJapanese($"新しいID##manual_trigger_id_{oldRowKey}", ref newId, 64))
+        {
+            this.manualTriggerIdInput = newId;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"更新##manual_trigger_id_apply_{oldRowKey}"))
+        {
+            this.TryUpdateManualFfxivLogTriggerId(trigger, listKind, index, oldRowKey);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"キャンセル##manual_trigger_id_cancel_{oldRowKey}"))
+        {
+            this.manualTriggerIdEditKey = string.Empty;
+            this.manualTriggerIdInput = string.Empty;
+            this.manualTriggerIdMessage = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(this.manualTriggerIdMessage))
+        {
+            var color = this.manualTriggerIdMessage.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+                ? new Vector4(1.0f, 0.35f, 0.35f, 1.0f)
+                : new Vector4(1.0f, 0.92f, 0.25f, 1.0f);
+            ImGui.TextColored(color, this.manualTriggerIdMessage);
+        }
+
+        ImGui.Unindent(24.0f);
+    }
+
+    private void TryUpdateManualFfxivLogTriggerId(HappyTriggerSetting trigger, TriggerListKind listKind, int index, string oldRowKey)
+    {
+        if (listKind != TriggerListKind.FfxivLog)
+        {
+            this.manualTriggerIdMessage = "[ERROR]ログトリガー以外のIDは手動更新できません。";
+            return;
+        }
+
+        if (index < 0 || index >= this.configuration.FfxivLogTriggers.Count)
+        {
+            this.manualTriggerIdMessage = "[ERROR]更新対象のログトリガーが見つかりません。";
+            return;
+        }
+
+        var newId = (this.manualTriggerIdInput ?? string.Empty).Trim();
+        if (!HappyTriggerSetting.IsValidManualTriggerId(newId))
+        {
+            this.manualTriggerIdMessage = "[ERROR]IDは半角英数字1〜6桁で入力してください。";
+            return;
+        }
+
+        if (this.IsDuplicateTriggerIdExcept(newId, listKind, index))
+        {
+            this.manualTriggerIdMessage = "[ERROR]指定したIDはすでに保存済みトリガーで使用されています。";
+            return;
+        }
+
+        var oldId = string.IsNullOrWhiteSpace(trigger.TriggerId) ? "未採番" : trigger.TriggerId.Trim();
+        trigger.TriggerId = newId;
+
+        if (!string.Equals(oldId, "未採番", StringComparison.OrdinalIgnoreCase))
+        {
+            this.UpdatePrerequisiteTriggerReferences(oldId, newId);
+        }
+
+        this.saveConfig();
+
+        var newRowKey = GetManagementTriggerKey(trigger, listKind, index);
+        if (string.Equals(this.selectedManagementTriggerKey, oldRowKey, StringComparison.OrdinalIgnoreCase))
+        {
+            this.selectedManagementTriggerKey = newRowKey;
+        }
+
+        this.manualTriggerIdEditKey = string.Empty;
+        this.manualTriggerIdInput = string.Empty;
+        this.manualTriggerIdMessage = $"ログトリガーIDを更新しました: {oldId} -> {newId}";
+    }
+
+    private void UpdatePrerequisiteTriggerReferences(string oldId, string newId)
+    {
+        foreach (var trigger in this.GetAllTriggers())
+        {
+            if (string.Equals(trigger.PrerequisiteTriggerId, oldId, StringComparison.OrdinalIgnoreCase))
+            {
+                trigger.PrerequisiteTriggerId = newId;
+            }
+        }
     }
 
     private void DrawManagementTriggerDetail(HappyTriggerSetting trigger)
@@ -2942,6 +3145,20 @@ public sealed class HappyTriggerWindow : Window
         ImGui.Checkbox("バトルログ自動スクロール", ref this.autoScrollBattleLog);
         ImGui.SameLine();
         ImGui.Checkbox("内部ログ自動スクロール", ref this.autoScrollInternalLog);
+
+        var showDebugLogs = this.configuration.ShowFfxivLogReferenceDebugLogs;
+        if (ImGui.Checkbox("FFXIV Log参照デバッグログを表示", ref showDebugLogs))
+        {
+            this.configuration.ShowFfxivLogReferenceDebugLogs = showDebugLogs;
+            this.saveConfig();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("OFF推奨");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("ONにすると、FFXIV Log参照トリガーの Matched / Missing 状態を内部ログに出力します。デバッグログはONでもトリガー判定対象から除外されます。");
+        }
 
         ImGui.TextDisabled("上段はFFXIVのチャットログ由来のログ、下段はHappyTrigger内部処理ログです。");
         ImGui.Spacing();
@@ -3243,10 +3460,65 @@ public sealed class HappyTriggerWindow : Window
         };
         var currentId = this.editTrigger.TriggerId;
 
-        if (!HappyTriggerSetting.IsValidTriggerId(currentId, prefix) || this.IsDuplicateTriggerId(currentId, saveTargetKind))
+        var isValidCurrentId = saveTargetKind == TriggerListKind.FfxivLog
+            ? HappyTriggerSetting.IsValidFfxivLogTriggerId(currentId)
+            : HappyTriggerSetting.IsValidTriggerId(currentId, prefix);
+
+        if (!isValidCurrentId || this.IsDuplicateTriggerId(currentId, saveTargetKind))
         {
             this.editTrigger.TriggerId = this.GenerateNextTriggerId(prefix);
         }
+    }
+
+    private bool IsDuplicateTriggerIdExcept(string? triggerId, TriggerListKind targetKind, int targetIndex)
+    {
+        if (string.IsNullOrWhiteSpace(triggerId))
+        {
+            return false;
+        }
+
+        var normalizedId = triggerId.Trim();
+
+        for (var i = 0; i < this.configuration.Triggers.Count; i++)
+        {
+            if (targetKind == TriggerListKind.Image && targetIndex == i)
+            {
+                continue;
+            }
+
+            if (string.Equals(this.configuration.Triggers[i].TriggerId, normalizedId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        for (var i = 0; i < this.configuration.TextTriggers.Count; i++)
+        {
+            if (targetKind == TriggerListKind.Text && targetIndex == i)
+            {
+                continue;
+            }
+
+            if (string.Equals(this.configuration.TextTriggers[i].TriggerId, normalizedId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        for (var i = 0; i < this.configuration.FfxivLogTriggers.Count; i++)
+        {
+            if (targetKind == TriggerListKind.FfxivLog && targetIndex == i)
+            {
+                continue;
+            }
+
+            if (string.Equals(this.configuration.FfxivLogTriggers[i].TriggerId, normalizedId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsDuplicateTriggerId(string? triggerId, TriggerListKind saveTargetKind)

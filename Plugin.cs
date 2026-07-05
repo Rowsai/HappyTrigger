@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
 using Dalamud.Game;
@@ -66,6 +67,13 @@ public sealed class Plugin : IDalamudPlugin
     private readonly HashSet<string> activeMemberStatusLogKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> activeEnemyStatusLogKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, StatusRemainingSnapshot> latestMemberStatusRemainingByJobAndName = new(StringComparer.OrdinalIgnoreCase);
+
+    // ステータス残り時間つきトリガーの重複発火抑止用です。
+    // activePopups だけを見ると、同一フレーム内や表示開始前/表示状態更新前のタイミングで
+    // 別トリガーが同じ StatusName に対して再度発火するケースがあるため、
+    // 「マッチ済み」の時点で StatusName をロックします。
+    private readonly Dictionary<string, DateTime> activeStatusRemainingMatchLocks = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, FfxivLogReferenceMatchState> ffxivLogReferenceMatchStates = new(StringComparer.OrdinalIgnoreCase);
     private bool wasFullWipeDetected = false;
 
@@ -147,7 +155,7 @@ public sealed class Plugin : IDalamudPlugin
             var beforeInternalLogKeywords = string.Join("\n", trigger.GetInternalLogKeywords());
             trigger.NormalizeInternalLogKeywords();
             changed |= !string.Equals(beforeInternalLogKeywords, string.Join("\n", trigger.GetInternalLogKeywords()), StringComparison.Ordinal);
-            changed |= EnsureTriggerId(trigger, trigger.UsePrerequisite ? "X" : "F", usedIds);
+            changed |= EnsureFfxivLogTriggerId(trigger, trigger.UsePrerequisite ? "X" : "F", usedIds);
         }
 
         return changed;
@@ -160,6 +168,26 @@ public sealed class Plugin : IDalamudPlugin
         if (!HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, prefix) || usedIds.Contains(trigger.TriggerId))
         {
             trigger.TriggerId = this.GenerateNextTriggerId(prefix, usedIds);
+            changed = true;
+        }
+
+        usedIds.Add(trigger.TriggerId);
+        return changed;
+    }
+
+    private bool EnsureFfxivLogTriggerId(HappyTriggerSetting trigger, string prefix, HashSet<string> usedIds)
+    {
+        var changed = false;
+        var currentId = trigger.TriggerId?.Trim() ?? string.Empty;
+
+        if (!HappyTriggerSetting.IsValidFfxivLogTriggerId(currentId) || usedIds.Contains(currentId))
+        {
+            trigger.TriggerId = this.GenerateNextTriggerId(prefix, usedIds);
+            changed = true;
+        }
+        else if (!string.Equals(trigger.TriggerId, currentId, StringComparison.Ordinal))
+        {
+            trigger.TriggerId = currentId;
             changed = true;
         }
 
@@ -314,6 +342,15 @@ public sealed class Plugin : IDalamudPlugin
 
     private void EvaluateInternalLogReferenceTriggers(FfxivLogEntry logEntry)
     {
+        // FFXIV Log参照トリガーのデバッグログは、内部ログ一覧には表示しても、
+        // トリガー判定の入力としては扱いません。
+        // これを許可すると、デバッグログ内の Matched / Missing / ActionId 等が
+        // 別トリガーの条件に誤ってヒットし、意図しない発火につながります。
+        if (IsFfxivLogReferenceDebugLog(logEntry))
+        {
+            return;
+        }
+
         foreach (var trigger in this.configuration.FfxivLogTriggers)
         {
             trigger.UseFfxivLogReference = true;
@@ -339,6 +376,9 @@ public sealed class Plugin : IDalamudPlugin
     {
         var requiresBattleLog = !string.IsNullOrWhiteSpace(trigger.BattleLogKeyword);
         var requiredInternalLogCount = trigger.GetInternalLogKeywords().Count;
+        var matchedLogStatusRemainingSnapshot = this.TryGetStatusRemainingSnapshotFromMatchedLog(trigger, logEntry, out var parsedStatusRemainingSnapshot)
+            ? parsedStatusRemainingSnapshot
+            : null;
 
         if (!requiresBattleLog && requiredInternalLogCount == 0)
         {
@@ -347,6 +387,8 @@ public sealed class Plugin : IDalamudPlugin
 
         if (trigger.UsePrerequisite && !this.HasActivePrerequisiteTrigger(trigger))
         {
+            var prerequisiteState = this.GetFfxivLogReferenceMatchState(trigger);
+            this.AddFfxivLogReferenceMatchDebug(trigger, prerequisiteState, "PrerequisiteMissing");
             this.ResetFfxivLogReferenceMatchState(trigger);
             return;
         }
@@ -361,13 +403,13 @@ public sealed class Plugin : IDalamudPlugin
         // 内部ログ1つだけ、かつバトルログ条件なしの場合は、内部ログに表示されたタイミングで即発火します。
         if (!requiresBattleLog && requiredInternalLogCount == 1)
         {
-            this.FireFfxivLogReferenceTrigger(trigger, source);
+            this.FireFfxivLogReferenceTrigger(trigger, source, matchedLogStatusRemainingSnapshot);
             return;
         }
 
         // バトルログ + 内部ログ、または複数内部ログの場合は、
         // 条件ごとのマッチ情報を保持し、すべて揃った場合だけ発火します。
-        // 内部ログが複数ある場合は「内部ログ1 → 内部ログ2 → ...」の順番でだけ進行します。
+        // 複数内部ログはゲーム側の出力順が前後することがあるため、順番不問で判定します。
         var state = this.GetFfxivLogReferenceMatchState(trigger);
         this.RemoveExpiredFfxivLogReferenceMatches(state);
 
@@ -377,22 +419,29 @@ public sealed class Plugin : IDalamudPlugin
         }
         else if (internalLogKeywordIndex >= 0)
         {
-            if (!this.TryRecordSequentialInternalLogMatch(trigger, state, internalLogKeywordIndex, logEntry))
+            if (!this.TryRecordInternalLogMatch(trigger, state, internalLogKeywordIndex, logEntry))
             {
                 return;
+            }
+
+            if (matchedLogStatusRemainingSnapshot != null)
+            {
+                state.MatchedLogStatusRemainingSnapshot = matchedLogStatusRemainingSnapshot;
             }
         }
 
         if (!this.IsFfxivLogReferencePairSatisfied(trigger, state))
         {
+            this.AddFfxivLogReferenceMatchDebug(trigger, state, "Waiting");
             return;
         }
 
-        this.FireFfxivLogReferenceTrigger(trigger, FfxivLogReferenceSource.All);
+        this.AddFfxivLogReferenceMatchDebug(trigger, state, "Matched");
+        this.FireFfxivLogReferenceTrigger(trigger, FfxivLogReferenceSource.All, state.MatchedLogStatusRemainingSnapshot);
         this.ResetFfxivLogReferenceMatchState(trigger);
     }
 
-    private bool TryRecordSequentialInternalLogMatch(
+    private bool TryRecordInternalLogMatch(
         HappyTriggerSetting trigger,
         FfxivLogReferenceMatchState state,
         int matchedIndex,
@@ -404,38 +453,10 @@ public sealed class Plugin : IDalamudPlugin
             return false;
         }
 
-        var expectedIndex = GetNextRequiredInternalLogIndex(state, requiredInternalLogCount);
-
-        if (matchedIndex != expectedIndex)
-        {
-            // 内部ログ1が再度マッチした場合は、新しい組み合わせの開始として扱います。
-            // 例: 内部ログ1 → 別ログ → 内部ログ1 → 内部ログ2 のようなケースで、後半の組み合わせを拾えます。
-            if (matchedIndex != 0)
-            {
-                return false;
-            }
-
-            state.InternalLogMatchedAtUtcByIndex.Clear();
-            expectedIndex = 0;
-        }
-
-        state.InternalLogMatchedAtUtcByIndex[expectedIndex] = logEntry.Timestamp.ToUniversalTime();
+        // 同じ条件が再度マッチした場合は、最新時刻で上書きします。
+        // これにより、内部ログ1/2/3 の出現順に依存せず、指定秒数内に全条件が揃えば発火します。
+        state.InternalLogMatchedAtUtcByIndex[matchedIndex] = logEntry.Timestamp.ToUniversalTime();
         return true;
-    }
-
-    private static int GetNextRequiredInternalLogIndex(
-        FfxivLogReferenceMatchState state,
-        int requiredInternalLogCount)
-    {
-        for (var i = 0; i < requiredInternalLogCount; i++)
-        {
-            if (!state.InternalLogMatchedAtUtcByIndex.ContainsKey(i))
-            {
-                return i;
-            }
-        }
-
-        return requiredInternalLogCount;
     }
 
     private void RemoveExpiredFfxivLogReferenceMatches(FfxivLogReferenceMatchState state)
@@ -458,8 +479,12 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        // 途中の内部ログが期限切れになった場合、順序保証のため内部ログ側の保持情報はすべてリセットします。
-        state.InternalLogMatchedAtUtcByIndex.Clear();
+        // 期限切れになった条件だけを外し、残りのマッチ状態は維持します。
+        // 複数内部ログは順番不問のため、片方が期限切れになっても他条件まで破棄しません。
+        foreach (var expiredInternalIndex in expiredInternalIndexes)
+        {
+            state.InternalLogMatchedAtUtcByIndex.Remove(expiredInternalIndex);
+        }
     }
 
     private FfxivLogReferenceMatchState GetFfxivLogReferenceMatchState(HappyTriggerSetting trigger)
@@ -511,6 +536,45 @@ public sealed class Plugin : IDalamudPlugin
         return (latest - earliest).TotalSeconds <= FfxivLogReferencePairWindowSeconds;
     }
 
+    private void AddFfxivLogReferenceMatchDebug(
+        HappyTriggerSetting trigger,
+        FfxivLogReferenceMatchState state,
+        string reason)
+    {
+        if (!this.configuration.ShowFfxivLogReferenceDebugLogs)
+        {
+            return;
+        }
+
+        var requiresBattleLog = !string.IsNullOrWhiteSpace(trigger.BattleLogKeyword);
+        var battleLogStatus = requiresBattleLog
+            ? state.BattleLogMatchedAtUtc == null ? "Missing" : "Matched"
+            : "NotRequired";
+
+        var internalLogKeywords = trigger.GetInternalLogKeywords();
+        var internalLogStatuses = new List<string>();
+        for (var i = 0; i < internalLogKeywords.Count; i++)
+        {
+            var status = state.InternalLogMatchedAtUtcByIndex.ContainsKey(i) ? "Matched" : "Missing";
+            internalLogStatuses.Add($"{i + 1}:{status}='{internalLogKeywords[i]}'");
+        }
+
+        var triggerName = string.IsNullOrWhiteSpace(trigger.TriggerName) ? "名称未設定" : trigger.TriggerName.Trim();
+        this.AddInternalLog(
+            $"FFXIV Log trigger debug. Id={trigger.TriggerId} Name='{triggerName}' Reason={reason} BattleLog={battleLogStatus} InternalLogs=[{string.Join(" / ", internalLogStatuses)}]",
+            false);
+    }
+
+    private static bool IsFfxivLogReferenceDebugLog(FfxivLogEntry logEntry)
+    {
+        var text = logEntry.Text ?? string.Empty;
+        var displayText = logEntry.DisplayText ?? string.Empty;
+
+        return text.StartsWith("FFXIV Log trigger debug.", StringComparison.OrdinalIgnoreCase)
+            || displayText.Contains("]FFXIV Log trigger debug.", StringComparison.OrdinalIgnoreCase)
+            || displayText.Contains("[HappyTrigger]FFXIV Log trigger debug.", StringComparison.OrdinalIgnoreCase);
+    }
+
     private void ResetFfxivLogReferenceMatchState(HappyTriggerSetting trigger)
     {
         this.ffxivLogReferenceMatchStates.Remove(this.GetFfxivLogReferenceStateKey(trigger));
@@ -533,17 +597,30 @@ public sealed class Plugin : IDalamudPlugin
             return false;
         }
 
-        this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
+        var nowUtc = DateTime.UtcNow;
+
+        // 通常の表示終了済み・手動クローズ済みのポップアップは掃除します。
+        // ただし、ステータス残り時間表示つきのポップアップは IsExpired が DisplaySeconds ではなく
+        // Remaining=0 を基準にするため、前提条件の判定では必ず StartTimeUtc～EndTimeUtc を使います。
+        this.activePopups.RemoveAll(x => x.IsClosed || (!x.HasStatusRemainingDisplay && x.IsExpired));
 
         foreach (var popup in this.activePopups)
         {
-            if (popup.IsPositionSetting || !popup.IsReadyToDisplay || popup.IsExpired || popup.IsClosed)
+            if (popup.IsPositionSetting || popup.IsClosed)
             {
                 continue;
             }
 
             var prerequisiteTrigger = popup.Trigger;
-            if (string.Equals(prerequisiteTrigger.TriggerId, trigger.PrerequisiteTriggerId, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(prerequisiteTrigger.TriggerId, trigger.PrerequisiteTriggerId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // 前提条件は「対象トリガーが表示中であること」を条件にします。
+            // 例: 表示時間10秒なら、表示開始から10秒以内だけ true です。
+            // ステータス残り時間表示で画面に長く残っていても、前提条件として有効なのは DisplaySeconds の範囲だけです。
+            if (nowUtc >= popup.StartTimeUtc && nowUtc < popup.EndTimeUtc)
             {
                 return true;
             }
@@ -552,20 +629,123 @@ public sealed class Plugin : IDalamudPlugin
         return false;
     }
 
-    private void FireFfxivLogReferenceTrigger(HappyTriggerSetting trigger, FfxivLogReferenceSource source)
+    private void FireFfxivLogReferenceTrigger(
+        HappyTriggerSetting trigger,
+        FfxivLogReferenceSource source,
+        StatusRemainingSnapshot? matchedLogStatusRemainingSnapshot = null)
     {
-        StatusRemainingSnapshot? statusRemainingSnapshot = null;
-        if (trigger.HasStatusRemainingAppendSetting() && !this.TryGetStatusRemainingSnapshot(trigger, out statusRemainingSnapshot))
+        StatusRemainingSnapshot? statusRemainingSnapshot = matchedLogStatusRemainingSnapshot;
+        if (statusRemainingSnapshot == null && trigger.HasStatusRemainingAppendSetting() && !this.TryGetStatusRemainingSnapshot(trigger, out statusRemainingSnapshot))
         {
             this.AddInternalLog(
                 $"Status remaining not found. Id={trigger.TriggerId} job={trigger.StatusRemainingJob} StatusName={trigger.StatusRemainingStatusName}",
                 false);
         }
 
+        if (this.ShouldSuppressDuplicateStatusRemainingTrigger(trigger, statusRemainingSnapshot))
+        {
+            this.AddInternalLog(
+                $"FFXIV Log trigger suppressed. Reason=DuplicateStatusRemaining Id={trigger.TriggerId} StatusName='{GetStatusRemainingLockName(trigger, statusRemainingSnapshot)}'",
+                false);
+            return;
+        }
+
+        this.ReserveStatusRemainingMatchLock(trigger, statusRemainingSnapshot);
+
         this.AddInternalLog(
             $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName}" : "OFF")}",
             false);
         this.ActivatePopup(trigger, false, statusRemainingSnapshot);
+    }
+
+    private bool ShouldSuppressDuplicateStatusRemainingTrigger(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return false;
+        }
+
+        var statusName = GetStatusRemainingLockName(trigger, statusRemainingSnapshot);
+        if (string.IsNullOrWhiteSpace(statusName))
+        {
+            return false;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredStatusRemainingMatchLocks(nowUtc);
+        this.activePopups.RemoveAll(x => x.IsClosed || x.IsExpired);
+
+        var lockKey = MakeStatusRemainingMatchLockKey(statusName);
+        if (this.activeStatusRemainingMatchLocks.TryGetValue(lockKey, out var lockedUntilUtc) && lockedUntilUtc > nowUtc)
+        {
+            return true;
+        }
+
+        return this.activePopups.Any(popup =>
+            popup.HasStatusRemainingDisplay &&
+            !popup.IsClosed &&
+            !popup.IsExpired &&
+            string.Equals(popup.StatusRemainingStatusName, statusName.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ReserveStatusRemainingMatchLock(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return;
+        }
+
+        var statusName = GetStatusRemainingLockName(trigger, statusRemainingSnapshot);
+        if (string.IsNullOrWhiteSpace(statusName))
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredStatusRemainingMatchLocks(nowUtc);
+
+        var lockUntilUtc = nowUtc.AddSeconds(Math.Max(0.1f, trigger.DisplaySeconds));
+        if (statusRemainingSnapshot != null)
+        {
+            // 実ログから取得した Remaining を基準に、同一ステータスの重複発火を抑止します。
+            // これにより、F00038 がマッチ済み/表示中の間に F00039 が同じ StatusName でマッチしても発火しません。
+            var statusRemainingUntilUtc = statusRemainingSnapshot.CapturedAtUtc.AddSeconds(Math.Max(0.1f, statusRemainingSnapshot.RemainingSeconds));
+            if (statusRemainingUntilUtc > lockUntilUtc)
+            {
+                lockUntilUtc = statusRemainingUntilUtc;
+            }
+        }
+
+        this.activeStatusRemainingMatchLocks[MakeStatusRemainingMatchLockKey(statusName)] = lockUntilUtc;
+    }
+
+    private void RemoveExpiredStatusRemainingMatchLocks(DateTime nowUtc)
+    {
+        var expiredKeys = this.activeStatusRemainingMatchLocks
+            .Where(pair => pair.Value <= nowUtc)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var expiredKey in expiredKeys)
+        {
+            this.activeStatusRemainingMatchLocks.Remove(expiredKey);
+        }
+    }
+
+    private static string GetStatusRemainingLockName(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        return (statusRemainingSnapshot?.StatusName ?? trigger.StatusRemainingStatusName ?? string.Empty).Trim();
+    }
+
+    private static string MakeStatusRemainingMatchLockKey(string statusName)
+    {
+        return statusName.Trim();
     }
 
     private IReadOnlyList<FfxivLogEntry> GetBattleLogsSnapshot()
@@ -593,6 +773,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         this.ffxivLogReferenceMatchStates.Clear();
+        this.activeStatusRemainingMatchLocks.Clear();
         this.AddInternalLog("FFXIV Log cleared.");
     }
 
@@ -779,6 +960,128 @@ public sealed class Plugin : IDalamudPlugin
             DateTime.UtcNow);
     }
 
+    private bool TryGetStatusRemainingSnapshotFromMatchedLog(
+        HappyTriggerSetting trigger,
+        FfxivLogEntry logEntry,
+        out StatusRemainingSnapshot? snapshot)
+    {
+        snapshot = null;
+
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return false;
+        }
+
+        var candidates = new[]
+        {
+            logEntry.Text ?? string.Empty,
+            logEntry.DisplayText ?? string.Empty,
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (TryParseMemberStatusRemaining(candidate, out var job, out var statusName, out var remainingSeconds) &&
+                IsStatusRemainingJobMatch(trigger.StatusRemainingJob, job) &&
+                string.Equals(statusName, trigger.StatusRemainingStatusName?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                remainingSeconds > 0.0f)
+            {
+                snapshot = new StatusRemainingSnapshot(job, statusName, remainingSeconds, logEntry.Timestamp.ToUniversalTime());
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseMemberStatusRemaining(
+        string text,
+        out string job,
+        out string statusName,
+        out float remainingSeconds)
+    {
+        job = string.Empty;
+        statusName = string.Empty;
+        remainingSeconds = 0.0f;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var normalized = StripLeadingLogPrefix(text);
+        if (!normalized.Contains("MemberStatus Information.", StringComparison.OrdinalIgnoreCase) ||
+            !normalized.Contains("Remaining=", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        job = GetLogFieldValue(normalized, "job");
+        statusName = GetLogFieldValue(normalized, "StatusName");
+        var remainingText = GetLogFieldValue(normalized, "Remaining");
+
+        if (string.IsNullOrWhiteSpace(job) ||
+            string.IsNullOrWhiteSpace(statusName) ||
+            string.IsNullOrWhiteSpace(remainingText))
+        {
+            return false;
+        }
+
+        remainingText = remainingText.Trim();
+        if (remainingText.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+        {
+            remainingText = remainingText[..^1];
+        }
+
+        return float.TryParse(
+            remainingText,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out remainingSeconds);
+    }
+
+    private static string StripLeadingLogPrefix(string value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+
+        // [19:52:54] のようなタイムスタンプを外します。
+        if (trimmed.Length >= 10 &&
+            trimmed[0] == '[' &&
+            char.IsDigit(trimmed[1]) &&
+            char.IsDigit(trimmed[2]) &&
+            trimmed[3] == ':' &&
+            char.IsDigit(trimmed[4]) &&
+            char.IsDigit(trimmed[5]) &&
+            trimmed[6] == ':' &&
+            char.IsDigit(trimmed[7]) &&
+            char.IsDigit(trimmed[8]) &&
+            trimmed[9] == ']')
+        {
+            trimmed = trimmed[10..].TrimStart();
+        }
+
+        // [HappyTrigger] のようなカテゴリを外します。
+        if (trimmed.Length >= 3 && trimmed[0] == '[')
+        {
+            var closeIndex = trimmed.IndexOf(']');
+            if (closeIndex > 0 && closeIndex + 1 < trimmed.Length)
+            {
+                trimmed = trimmed[(closeIndex + 1)..].TrimStart();
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static string GetLogFieldValue(string text, string fieldName)
+    {
+        var match = Regex.Match(
+            text,
+            $@"(?:^|\s){Regex.Escape(fieldName)}=(?<value>.*?)(?=\s[A-Za-z][A-Za-z0-9_]*=|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return match.Success ? match.Groups["value"].Value.Trim() : string.Empty;
+    }
+
     private bool TryGetStatusRemainingSnapshot(HappyTriggerSetting trigger, out StatusRemainingSnapshot? snapshot)
     {
         snapshot = null;
@@ -788,21 +1091,55 @@ public sealed class Plugin : IDalamudPlugin
             return false;
         }
 
-        var key = MakeStatusRemainingKey(trigger.StatusRemainingJob, trigger.StatusRemainingStatusName);
-        if (!this.latestMemberStatusRemainingByJobAndName.TryGetValue(key, out var found))
+        var statusNameFilter = trigger.StatusRemainingStatusName?.Trim() ?? string.Empty;
+        var matchingSnapshots = this.latestMemberStatusRemainingByJobAndName
+            .Where(pair =>
+                IsStatusRemainingJobMatch(trigger.StatusRemainingJob, pair.Value.Job) &&
+                string.Equals(pair.Value.StatusName, statusNameFilter, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(pair => pair.Value.CapturedAtUtc)
+            .ToList();
+
+        foreach (var pair in matchingSnapshots)
+        {
+            var found = pair.Value;
+            var currentRemaining = found.RemainingSeconds - (float)Math.Max(0.0, (DateTime.UtcNow - found.CapturedAtUtc).TotalSeconds);
+            if (currentRemaining <= 0.0f)
+            {
+                this.latestMemberStatusRemainingByJobAndName.Remove(pair.Key);
+                continue;
+            }
+
+            snapshot = new StatusRemainingSnapshot(found.Job, found.StatusName, currentRemaining, DateTime.UtcNow);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsStatusRemainingJobMatch(string? jobFilter, string logJob)
+    {
+        var normalizedLogJob = (logJob ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(jobFilter) || string.IsNullOrWhiteSpace(normalizedLogJob))
         {
             return false;
         }
 
-        var currentRemaining = found.RemainingSeconds - (float)Math.Max(0.0, (DateTime.UtcNow - found.CapturedAtUtc).TotalSeconds);
-        if (currentRemaining <= 0.0f)
+        var allowedJobs = ParseStatusRemainingJobFilter(jobFilter);
+        return allowedJobs.Any(job => string.Equals(job, normalizedLogJob, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<string> ParseStatusRemainingJobFilter(string jobFilter)
+    {
+        var normalized = (jobFilter ?? string.Empty).Trim();
+        if (normalized.Length >= 2 && normalized.StartsWith("<", StringComparison.Ordinal) && normalized.EndsWith(">", StringComparison.Ordinal))
         {
-            this.latestMemberStatusRemainingByJobAndName.Remove(key);
-            return false;
+            normalized = normalized[1..^1];
         }
 
-        snapshot = new StatusRemainingSnapshot(found.Job, found.StatusName, currentRemaining, DateTime.UtcNow);
-        return true;
+        return normalized
+            .Split(new[] { '|', ',', '，', '、' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(job => !string.IsNullOrWhiteSpace(job))
+            .ToList();
     }
 
     private static string MakeStatusRemainingKey(string job, string statusName)
@@ -1401,6 +1738,8 @@ public sealed class Plugin : IDalamudPlugin
         public DateTime? BattleLogMatchedAtUtc { get; set; }
 
         public Dictionary<int, DateTime> InternalLogMatchedAtUtcByIndex { get; } = new();
+
+        public StatusRemainingSnapshot? MatchedLogStatusRemainingSnapshot { get; set; }
     }
 
     public void Dispose()
