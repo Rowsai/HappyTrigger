@@ -55,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("HappyTrigger");
     private readonly Configuration configuration;
     private readonly ImageCacheService imageCacheService;
+    private readonly VoiceVoxSpeechService voiceVoxSpeechService;
     private readonly VfxLogCollector vfxLogCollector;
     private readonly HappyTriggerWindow configWindow;
     private readonly List<PopupImageState> activePopups = new();
@@ -95,6 +96,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         this.imageCacheService = new ImageCacheService(TextureProvider);
+        this.voiceVoxSpeechService = new VoiceVoxSpeechService(message => this.AddInternalLog(message, false));
         this.vfxLogCollector = new VfxLogCollector(ObjectTable, GameInteropProvider, Log, this.AddVfxInternalLog);
         this.configWindow = new HappyTriggerWindow(
             this.configuration,
@@ -619,6 +621,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 this.AddInternalLog($"Text display queued. Text='{trigger.DisplayText}', Wait={Math.Clamp(trigger.WaitSeconds, 0.0f, 600.0f):0.##}s, X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
             }
+
+            this.voiceVoxSpeechService.SpeakAsync(trigger);
 
             return;
         }
@@ -1410,6 +1414,7 @@ public sealed class Plugin : IDalamudPlugin
 
         this.windowSystem.RemoveAllWindows();
         this.vfxLogCollector.Dispose();
+        this.voiceVoxSpeechService.Dispose();
         this.imageCacheService.Dispose();
     }
 }

@@ -65,6 +65,80 @@ public static class NativeFileDialogService
     [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool GetOpenFileName(ref OpenFileName ofn);
 
+
+    public static bool TryOpenCsvFile(out string filePath)
+    {
+        filePath = string.Empty;
+
+        var fileBuffer = IntPtr.Zero;
+        var filterBuffer = IntPtr.Zero;
+        var titleBuffer = IntPtr.Zero;
+        var defaultExtBuffer = IntPtr.Zero;
+
+        try
+        {
+            fileBuffer = Marshal.AllocHGlobal(MaxPathChars * sizeof(char));
+            ZeroMemory(fileBuffer, MaxPathChars * sizeof(char));
+
+            filterBuffer = Marshal.StringToHGlobalUni(
+                "CSVファイル (*.csv)\0*.csv\0" +
+                "すべてのファイル (*.*)\0*.*\0\0");
+
+            titleBuffer = Marshal.StringToHGlobalUni("CSVを選択");
+            defaultExtBuffer = Marshal.StringToHGlobalUni("csv");
+
+            var ofn = new OpenFileName
+            {
+                lStructSize = Marshal.SizeOf<OpenFileName>(),
+                hwndOwner = IntPtr.Zero,
+                hInstance = IntPtr.Zero,
+                lpstrFilter = filterBuffer,
+                lpstrFile = fileBuffer,
+                nMaxFile = MaxPathChars,
+                lpstrTitle = titleBuffer,
+                lpstrDefExt = defaultExtBuffer,
+                nFilterIndex = 1,
+                Flags =
+                    OfnExplorer |
+                    OfnFileMustExist |
+                    OfnPathMustExist |
+                    OfnNoChangeDir |
+                    OfnHideReadOnly |
+                    OfnEnableSizing
+            };
+
+            if (!GetOpenFileName(ref ofn))
+            {
+                return false;
+            }
+
+            filePath = Marshal.PtrToStringUni(fileBuffer) ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(filePath);
+        }
+        finally
+        {
+            if (fileBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(fileBuffer);
+            }
+
+            if (filterBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(filterBuffer);
+            }
+
+            if (titleBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(titleBuffer);
+            }
+
+            if (defaultExtBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(defaultExtBuffer);
+            }
+        }
+    }
+
     public static bool TryOpenImageFile(out string filePath)
     {
         filePath = string.Empty;

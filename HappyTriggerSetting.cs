@@ -31,6 +31,15 @@ public sealed class HappyTriggerSetting
     // 画像表示用は I00001、テキスト表示用は T00001 の形式で採番します。
     public string TriggerId { get; set; } = string.Empty;
 
+    // トリガー管理や一覧で表示する任意名称です。空欄の場合は「名称未設定」と表示します。
+    public string TriggerName { get; set; } = string.Empty;
+
+    // トリガー管理で所属するトリガーボックスIDです。未設定の場合は未分類扱いです。
+    public string TriggerBoxId { get; set; } = string.Empty;
+
+    // トリガー管理で所属するトリガーラベルIDです。未設定の場合は未分類扱いです。
+    public string TriggerLabelId { get; set; } = string.Empty;
+
     public string Keyword { get; set; } = string.Empty;
 
     public bool ExactMatch { get; set; } = false;
@@ -72,6 +81,15 @@ public sealed class HappyTriggerSetting
 
     // DisplayTextMode=true の場合に表示する任意テキストです。
     public string DisplayText { get; set; } = string.Empty;
+
+    // DisplayTextMode=true の場合に、表示対象テキストをVOICEVOXで読み上げるかどうかです。
+    public bool EnableVoiceVox { get; set; } = false;
+
+    // VOICEVOX Engine の接続先です。通常は http://127.0.0.1:50021 です。
+    public string VoiceVoxEndpoint { get; set; } = "http://127.0.0.1:50021";
+
+    // VOICEVOX の話者IDです。
+    public int VoiceVoxSpeakerId { get; set; } = 3;
 
     public bool IsWebImage { get; set; } = false;
 
@@ -158,6 +176,9 @@ public sealed class HappyTriggerSetting
         {
             Enabled = this.Enabled,
             TriggerId = this.TriggerId,
+            TriggerName = this.TriggerName,
+            TriggerBoxId = this.TriggerBoxId,
+            TriggerLabelId = this.TriggerLabelId,
             Keyword = this.Keyword,
             ExactMatch = this.ExactMatch,
             UseFfxivLogReference = this.UseFfxivLogReference,
@@ -171,6 +192,9 @@ public sealed class HappyTriggerSetting
             InternalLogKeywords = this.GetInternalLogKeywords().ToList(),
             DisplayTextMode = this.DisplayTextMode,
             DisplayText = this.DisplayText,
+            EnableVoiceVox = this.EnableVoiceVox,
+            VoiceVoxEndpoint = this.VoiceVoxEndpoint,
+            VoiceVoxSpeakerId = this.VoiceVoxSpeakerId,
             IsWebImage = this.IsWebImage,
             ImagePath = this.ImagePath,
             PositionX = this.PositionX,
@@ -248,6 +272,43 @@ public sealed class HappyTriggerSetting
     public static string FormatTriggerId(string prefix, int number)
     {
         return $"{prefix}{Math.Max(1, number):D5}";
+    }
+
+    public static bool TryGetManagementIdNumber(string? id, string prefix, out int number)
+    {
+        number = 0;
+
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(prefix))
+        {
+            return false;
+        }
+
+        var trimmedId = id.Trim();
+        if (!trimmedId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var numberPart = trimmedId[prefix.Length..];
+        if (numberPart.Length != 3)
+        {
+            return false;
+        }
+
+        foreach (var c in numberPart)
+        {
+            if (!char.IsDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return int.TryParse(numberPart, out number) && number > 0;
+    }
+
+    public static string FormatManagementId(string prefix, int number)
+    {
+        return $"{prefix}{Math.Max(1, number):D3}";
     }
 
     public bool IsMatch(string chatText)

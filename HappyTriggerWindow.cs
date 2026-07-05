@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 
@@ -19,6 +22,47 @@ public sealed class HappyTriggerWindow : Window
     private const int StyleColorCount = 12;
     private const int MaxVisibleLogRows = 30;
 
+    private static readonly VoiceVoxSpeakerOption[] VoiceVoxSpeakerOptions =
+    {
+        new(3, "ずんだもん - ノーマル (3)"),
+        new(1, "ずんだもん - あまあま (1)"),
+        new(5, "ずんだもん - セクシー (5)"),
+        new(7, "ずんだもん - ツンツン (7)"),
+        new(22, "ずんだもん - ささやき (22)"),
+        new(38, "ずんだもん - ヒソヒソ (38)"),
+        new(2, "四国めたん - ノーマル (2)"),
+        new(0, "四国めたん - あまあま (0)"),
+        new(4, "四国めたん - セクシー (4)"),
+        new(6, "四国めたん - ツンツン (6)"),
+        new(36, "四国めたん - ささやき (36)"),
+        new(37, "四国めたん - ヒソヒソ (37)"),
+        new(8, "春日部つむぎ - ノーマル (8)"),
+        new(10, "雨晴はう - ノーマル (10)"),
+        new(9, "波音リツ - ノーマル (9)"),
+        new(14, "冥鳴ひまり - ノーマル (14)"),
+        new(13, "青山龍星 - ノーマル (13)"),
+        new(11, "玄野武宏 - ノーマル (11)"),
+        new(12, "白上虎太郎 - ノーマル (12)"),
+        new(15, "九州そら - あまあま (15)"),
+        new(16, "九州そら - ノーマル (16)"),
+        new(17, "九州そら - セクシー (17)"),
+        new(18, "九州そら - ツンツン (18)"),
+        new(19, "九州そら - ささやき (19)"),
+        new(20, "もち子さん - ノーマル (20)"),
+        new(21, "剣崎雌雄 - ノーマル (21)"),
+        new(23, "WhiteCUL - ノーマル (23)"),
+        new(24, "WhiteCUL - たのしい (24)"),
+        new(25, "WhiteCUL - かなしい (25)"),
+        new(26, "WhiteCUL - びえーん (26)"),
+        new(29, "No.7 - ノーマル (29)"),
+        new(30, "No.7 - アナウンス (30)"),
+        new(31, "No.7 - 読み聞かせ (31)"),
+        new(46, "小夜/SAYO - ノーマル (46)"),
+        new(47, "ナースロボ＿タイプＴ - ノーマル (47)"),
+    };
+
+    private sealed record VoiceVoxSpeakerOption(int Id, string Label);
+
     private readonly Configuration configuration;
     private readonly Action saveConfig;
     private readonly Action<HappyTriggerSetting> testTrigger;
@@ -35,6 +79,14 @@ public sealed class HappyTriggerWindow : Window
     private int selectedBattleLogIndex = -1;
     private int selectedInternalLogIndex = -1;
     private bool requestOpenTriggerEditTab = false;
+    private string newTriggerBoxName = string.Empty;
+    private string newTriggerLabelName = string.Empty;
+    private string selectedManagementBoxId = string.Empty;
+    private string selectedManagementLabelBoxId = string.Empty;
+    private string selectedManagementTriggerKey = string.Empty;
+    private string triggerBoxExportMessage = string.Empty;
+    private string importCsvPath = string.Empty;
+    private string triggerImportMessage = string.Empty;
 
     private HappyTriggerSetting editTrigger = new();
     private int editingIndex = -1;
@@ -63,7 +115,8 @@ public sealed class HappyTriggerWindow : Window
 
         this.Size = new Vector2(1050, 700);
         this.SizeCondition = ImGuiCond.FirstUseEver;
-        this.Flags = ImGuiWindowFlags.NoCollapse;
+        // ウィンドウ右上の折りたたみ（最小化）ボタンを表示するため、NoCollapse は指定しません。
+        this.Flags = ImGuiWindowFlags.None;
     }
 
     public override void PreDraw()
@@ -107,6 +160,12 @@ public sealed class HappyTriggerWindow : Window
             if (ImGui.BeginTabItem("トリガー一覧"))
             {
                 this.DrawTriggerListTab();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("トリガー管理"))
+            {
+                this.DrawTriggerManagementTab();
                 ImGui.EndTabItem();
             }
 
@@ -172,7 +231,7 @@ public sealed class HappyTriggerWindow : Window
         {
             var keyword = this.editTrigger.Keyword ?? string.Empty;
             ImGui.SetNextItemWidth(700.0f);
-            if (ImGui.InputText("トリガー文字", ref keyword, 512))
+            if (InputTextJapanese("トリガー文字", ref keyword, 512))
             {
                 this.editTrigger.Keyword = keyword;
             }
@@ -182,6 +241,15 @@ public sealed class HappyTriggerWindow : Window
             ? "ID: 未採番（保存時に自動採番）"
             : $"ID: {this.editTrigger.TriggerId}";
         ImGui.TextDisabled(triggerIdText);
+
+        var triggerName = RemoveLineBreaks(this.editTrigger.TriggerName ?? string.Empty);
+        ImGui.SetNextItemWidth(420.0f);
+        if (InputTextJapanese("トリガー名", ref triggerName, 256))
+        {
+            this.editTrigger.TriggerName = RemoveLineBreaks(triggerName);
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("空欄の場合は『名称未設定』として表示します。名称は重複しても問題ありません。");
 
         ImGui.Spacing();
         ImGui.Text("詳細設定");
@@ -209,6 +277,10 @@ public sealed class HappyTriggerWindow : Window
 
         ImGui.SameLine();
         ImGui.TextDisabled("トリガー文字を検知してから表示するまでの秒数です。0秒なら即時表示します。");
+
+        ImGui.Spacing();
+        ImGui.Text("管理設定");
+        this.DrawTriggerManagementAssignmentArea();
 
         ImGui.Spacing();
         ImGui.Text("表示項目設定");
@@ -305,7 +377,7 @@ public sealed class HappyTriggerWindow : Window
 
         var battleLogKeyword = RemoveLineBreaks(this.editTrigger.BattleLogKeyword ?? string.Empty);
         ImGui.SetNextItemWidth(700.0f);
-        if (ImGui.InputText("バトルログ", ref battleLogKeyword, 2048))
+        if (InputTextJapanese("バトルログ", ref battleLogKeyword, 2048))
         {
             this.editTrigger.BattleLogKeyword = RemoveLineBreaks(battleLogKeyword);
         }
@@ -316,7 +388,7 @@ public sealed class HappyTriggerWindow : Window
         {
             var internalLogKeyword = RemoveLineBreaks(internalLogKeywords[i] ?? string.Empty);
             ImGui.SetNextItemWidth(1300.0f);
-            if (ImGui.InputText($"内部ログ {i + 1}", ref internalLogKeyword, 2048))
+            if (InputTextJapanese($"内部ログ {i + 1}", ref internalLogKeyword, 2048))
             {
                 internalLogKeywords[i] = RemoveLineBreaks(internalLogKeyword);
                 this.SetEditingInternalLogKeywords(internalLogKeywords);
@@ -354,7 +426,7 @@ public sealed class HappyTriggerWindow : Window
         {
             var statusJob = RemoveLineBreaks(this.editTrigger.StatusRemainingJob ?? string.Empty);
             ImGui.SetNextItemWidth(180.0f);
-            if (ImGui.InputText("ジョブ", ref statusJob, 64))
+            if (InputTextJapanese("ジョブ", ref statusJob, 64))
             {
                 this.editTrigger.StatusRemainingJob = RemoveLineBreaks(statusJob).Trim();
             }
@@ -364,7 +436,7 @@ public sealed class HappyTriggerWindow : Window
 
             var statusName = RemoveLineBreaks(this.editTrigger.StatusRemainingStatusName ?? string.Empty);
             ImGui.SetNextItemWidth(360.0f);
-            if (ImGui.InputText("ステータス名", ref statusName, 256))
+            if (InputTextJapanese("ステータス名", ref statusName, 256))
             {
                 this.editTrigger.StatusRemainingStatusName = RemoveLineBreaks(statusName).Trim();
             }
@@ -411,6 +483,15 @@ public sealed class HappyTriggerWindow : Window
         this.editTrigger.InternalLogKeyword = string.Join(
             HappyTriggerSetting.InternalLogKeywordDelimiter,
             normalizedKeywords.Where(keyword => !string.IsNullOrWhiteSpace(keyword)));
+    }
+
+    private static bool InputTextJapanese(string label, ref string value, int maxLength)
+    {
+        // Dalamud.Bindings.ImGui の string overload は第3引数を UTF-8 バイト長として扱うため、
+        // 日本語のようなマルチバイト文字では指定値そのままだと入力できない/途中で欠けることがあります。
+        // UI側で指定している長さは「文字数の上限」として扱い、UTF-8最大4byte分のバッファを確保します。
+        var utf8BufferSize = Math.Max(maxLength * 4 + 1, 256);
+        return ImGui.InputText(label, ref value, utf8BufferSize);
     }
 
     private static string RemoveLineBreaks(string value)
@@ -513,11 +594,74 @@ public sealed class HappyTriggerWindow : Window
 
         var displayText = this.editTrigger.DisplayText ?? string.Empty;
         ImGui.SetNextItemWidth(700.0f);
-        if (ImGui.InputText("表示対象テキスト", ref displayText, 1024))
+        if (InputTextJapanese("表示対象テキスト", ref displayText, 1024))
         {
             this.editTrigger.DisplayText = displayText;
         }
 
+        ImGui.Spacing();
+        var enableVoiceVox = this.editTrigger.EnableVoiceVox;
+        if (ImGui.Checkbox("VOICEVOXで読み上げる", ref enableVoiceVox))
+        {
+            this.editTrigger.EnableVoiceVox = enableVoiceVox;
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("ONの場合、表示対象テキストをVOICEVOX Engineで読み上げます。");
+
+        if (this.editTrigger.EnableVoiceVox)
+        {
+            var endpoint = string.IsNullOrWhiteSpace(this.editTrigger.VoiceVoxEndpoint)
+                ? "http://127.0.0.1:50021"
+                : this.editTrigger.VoiceVoxEndpoint;
+            ImGui.SetNextItemWidth(360.0f);
+            if (InputTextJapanese("VOICEVOX URL", ref endpoint, 512))
+            {
+                this.editTrigger.VoiceVoxEndpoint = endpoint.Trim();
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled("例: http://127.0.0.1:50021");
+
+            var speakerId = this.editTrigger.VoiceVoxSpeakerId;
+            var speakerLabels = VoiceVoxSpeakerOptions.Select(option => option.Label).ToArray();
+            var selectedSpeakerIndex = Array.FindIndex(VoiceVoxSpeakerOptions, option => option.Id == speakerId);
+            var speakerComboPreview = selectedSpeakerIndex >= 0
+                ? VoiceVoxSpeakerOptions[selectedSpeakerIndex].Label
+                : $"カスタム / 未登録 Speaker ID ({speakerId})";
+
+            ImGui.SetNextItemWidth(360.0f);
+            if (ImGui.BeginCombo("話者", speakerComboPreview))
+            {
+                for (var i = 0; i < VoiceVoxSpeakerOptions.Length; i++)
+                {
+                    var isSelected = i == selectedSpeakerIndex;
+                    if (ImGui.Selectable(speakerLabels[i], isSelected))
+                    {
+                        this.editTrigger.VoiceVoxSpeakerId = VoiceVoxSpeakerOptions[i].Id;
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+
+            speakerId = this.editTrigger.VoiceVoxSpeakerId;
+            ImGui.SetNextItemWidth(180.0f);
+            if (ImGui.InputInt("Speaker ID", ref speakerId))
+            {
+                this.editTrigger.VoiceVoxSpeakerId = Math.Max(0, speakerId);
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled("一覧にない話者/スタイルはSpeaker IDを直接入力してください。");
+        }
+
+        ImGui.Spacing();
         var textSize = this.editTrigger.TextSize;
         ImGui.SetNextItemWidth(180.0f);
         if (ImGui.InputFloat("テキストサイズ", ref textSize, 1.0f, 10.0f))
@@ -694,7 +838,7 @@ public sealed class HappyTriggerWindow : Window
 
         var imagePath = this.editTrigger.ImagePath ?? string.Empty;
         ImGui.SetNextItemWidth(700.0f);
-        if (ImGui.InputText("画像のパス / URL", ref imagePath, 2048))
+        if (InputTextJapanese("画像のパス / URL", ref imagePath, 2048))
         {
             this.editTrigger.ImagePath = imagePath;
             this.imageSelectMessage = string.Empty;
@@ -722,6 +866,79 @@ public sealed class HappyTriggerWindow : Window
         }
 
         ImGui.TextDisabled("位置設定ボタンを押すと、現在のX/Y座標に表示します。左クリックドラッグで画面位置X/Yに反映、右クリックで閉じます。");
+    }
+
+
+    private void DrawTriggerManagementAssignmentArea()
+    {
+        var currentBoxName = this.GetTriggerBoxDisplayName(this.editTrigger.TriggerBoxId, "未分類");
+        ImGui.SetNextItemWidth(300.0f);
+        if (ImGui.BeginCombo("トリガーボックス", currentBoxName))
+        {
+            if (ImGui.Selectable("未分類", string.IsNullOrWhiteSpace(this.editTrigger.TriggerBoxId)))
+            {
+                this.editTrigger.TriggerBoxId = string.Empty;
+                this.editTrigger.TriggerLabelId = string.Empty;
+            }
+
+            foreach (var box in this.configuration.TriggerBoxes)
+            {
+                var displayName = this.GetTriggerBoxDisplayName(box.BoxId, "名称未設定");
+                var isSelected = string.Equals(this.editTrigger.TriggerBoxId, box.BoxId, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(displayName, isSelected))
+                {
+                    this.editTrigger.TriggerBoxId = box.BoxId;
+
+                    if (!this.configuration.TriggerLabels.Any(label =>
+                            string.Equals(label.BoxId, box.BoxId, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(label.LabelId, this.editTrigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        this.editTrigger.TriggerLabelId = string.Empty;
+                    }
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
+
+        var currentLabelName = this.GetTriggerLabelDisplayName(this.editTrigger.TriggerLabelId, "未分類");
+        ImGui.SetNextItemWidth(300.0f);
+        if (ImGui.BeginCombo("トリガーラベル", currentLabelName))
+        {
+            if (ImGui.Selectable("未分類", string.IsNullOrWhiteSpace(this.editTrigger.TriggerLabelId)))
+            {
+                this.editTrigger.TriggerLabelId = string.Empty;
+            }
+
+            foreach (var label in this.configuration.TriggerLabels
+                         .Where(label => string.IsNullOrWhiteSpace(this.editTrigger.TriggerBoxId)
+                             || string.Equals(label.BoxId, this.editTrigger.TriggerBoxId, StringComparison.OrdinalIgnoreCase)))
+            {
+                var displayName = this.GetTriggerLabelDisplayName(label.LabelId, "名称未設定");
+                var isSelected = string.Equals(this.editTrigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(displayName, isSelected))
+                {
+                    this.editTrigger.TriggerLabelId = label.LabelId;
+                    this.editTrigger.TriggerBoxId = label.BoxId;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled("トリガーボックス / トリガーラベルは『トリガー管理』タブで作成できます。未分類のままでも保存できます。");
     }
 
     private void DrawTriggerListTab()
@@ -761,7 +978,6 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("高さ", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("倍率", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("待機/表示", ImGuiTableColumnFlags.WidthFixed, 90.0f);
-            ImGui.TableSetupColumn("残り時間", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableHeadersRow();
 
@@ -847,7 +1063,6 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("Fade", ImGuiTableColumnFlags.WidthFixed, 60.0f);
             ImGui.TableSetupColumn("X/Y", ImGuiTableColumnFlags.WidthFixed, 120.0f);
             ImGui.TableSetupColumn("待機/表示", ImGuiTableColumnFlags.WidthFixed, 90.0f);
-            ImGui.TableSetupColumn("残り時間", ImGuiTableColumnFlags.WidthFixed, 150.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableHeadersRow();
 
@@ -1010,12 +1225,7 @@ public sealed class HappyTriggerWindow : Window
 
     private void DrawListOperationButtons(int index, TriggerListKind listKind, HappyTriggerSetting trigger)
     {
-        var key = listKind switch
-        {
-            TriggerListKind.FfxivLog => "ffxivlog",
-            TriggerListKind.Text => "text",
-            _ => "image",
-        };
+        var key = GetTriggerListKindKey(listKind);
 
         if (ImGui.SmallButton($"テスト##{key}_test_{index}"))
         {
@@ -1026,47 +1236,97 @@ public sealed class HappyTriggerWindow : Window
 
         if (ImGui.SmallButton($"編集##{key}_edit_{index}"))
         {
-            this.editingIndex = index;
-            this.editingKind = listKind;
-            this.editTrigger = trigger.Clone();
-            this.editTrigger.UseFfxivLogReference = listKind == TriggerListKind.FfxivLog;
-            if (listKind == TriggerListKind.Image)
-            {
-                this.editTrigger.DisplayTextMode = false;
-            }
-            else if (listKind == TriggerListKind.Text)
-            {
-                this.editTrigger.DisplayTextMode = true;
-            }
-
-            this.imageSelectMessage = string.Empty;
-            this.requestOpenTriggerEditTab = true;
+            this.BeginEditTrigger(index, listKind, trigger);
         }
 
         ImGui.SameLine();
 
         if (ImGui.SmallButton($"削除##{key}_delete_{index}"))
         {
-            if (listKind == TriggerListKind.FfxivLog)
-            {
-                this.configuration.FfxivLogTriggers.RemoveAt(index);
-            }
-            else if (listKind == TriggerListKind.Text)
-            {
-                this.configuration.TextTriggers.RemoveAt(index);
-            }
-            else
-            {
-                this.configuration.Triggers.RemoveAt(index);
-            }
-
-            this.saveConfig();
-
-            if (this.editingIndex == index && this.editingKind == listKind)
-            {
-                this.ResetEditing();
-            }
+            this.DeleteTrigger(index, listKind);
         }
+    }
+
+    private void BeginEditTrigger(int index, TriggerListKind listKind, HappyTriggerSetting trigger)
+    {
+        this.editingIndex = index;
+        this.editingKind = listKind;
+        this.editTrigger = trigger.Clone();
+        this.editTrigger.UseFfxivLogReference = listKind == TriggerListKind.FfxivLog;
+
+        if (listKind == TriggerListKind.Image)
+        {
+            this.editTrigger.DisplayTextMode = false;
+        }
+        else if (listKind == TriggerListKind.Text)
+        {
+            this.editTrigger.DisplayTextMode = true;
+        }
+
+        this.imageSelectMessage = string.Empty;
+        this.requestOpenTriggerEditTab = true;
+    }
+
+    private void DeleteTrigger(int index, TriggerListKind listKind)
+    {
+        if (listKind == TriggerListKind.FfxivLog)
+        {
+            if (index < 0 || index >= this.configuration.FfxivLogTriggers.Count)
+            {
+                return;
+            }
+
+            var deletedKey = GetManagementTriggerKey(this.configuration.FfxivLogTriggers[index], listKind, index);
+            this.configuration.FfxivLogTriggers.RemoveAt(index);
+            this.ClearSelectedManagementTriggerIfMatched(deletedKey);
+        }
+        else if (listKind == TriggerListKind.Text)
+        {
+            if (index < 0 || index >= this.configuration.TextTriggers.Count)
+            {
+                return;
+            }
+
+            var deletedKey = GetManagementTriggerKey(this.configuration.TextTriggers[index], listKind, index);
+            this.configuration.TextTriggers.RemoveAt(index);
+            this.ClearSelectedManagementTriggerIfMatched(deletedKey);
+        }
+        else
+        {
+            if (index < 0 || index >= this.configuration.Triggers.Count)
+            {
+                return;
+            }
+
+            var deletedKey = GetManagementTriggerKey(this.configuration.Triggers[index], listKind, index);
+            this.configuration.Triggers.RemoveAt(index);
+            this.ClearSelectedManagementTriggerIfMatched(deletedKey);
+        }
+
+        this.saveConfig();
+
+        if (this.editingIndex == index && this.editingKind == listKind)
+        {
+            this.ResetEditing();
+        }
+    }
+
+    private void ClearSelectedManagementTriggerIfMatched(string deletedKey)
+    {
+        if (string.Equals(this.selectedManagementTriggerKey, deletedKey, StringComparison.OrdinalIgnoreCase))
+        {
+            this.selectedManagementTriggerKey = string.Empty;
+        }
+    }
+
+    private static string GetTriggerListKindKey(TriggerListKind listKind)
+    {
+        return listKind switch
+        {
+            TriggerListKind.FfxivLog => "ffxivlog",
+            TriggerListKind.Text => "text",
+            _ => "image",
+        };
     }
 
     private static string GetTextFontDesignLabel(TextFontDesign design)
@@ -1079,6 +1339,1594 @@ public sealed class HappyTriggerWindow : Window
             TextFontDesign.Neon => "ネオン風",
             _ => "標準",
         };
+    }
+
+
+    private void DrawTriggerManagementTab()
+    {
+        ImGui.Spacing();
+        ImGui.Text("トリガーボックス / トリガーラベル管理");
+        ImGui.TextDisabled("トリガーボックス > トリガーラベル > 作成したトリガー の階層で整理できます。");
+        ImGui.Separator();
+
+        if (ImGui.BeginTabBar("HappyTriggerManagementTabBar"))
+        {
+            if (ImGui.BeginTabItem("ボックス・ラベル作成"))
+            {
+                this.DrawTriggerBoxAndLabelEditor();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("階層表示"))
+            {
+                this.DrawTriggerManagementTree();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Import"))
+            {
+                this.DrawTriggerImportTab();
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
+        }
+    }
+
+
+    private void DrawTriggerImportTab()
+    {
+        ImGui.Spacing();
+        ImGui.Text("CSV Import");
+        ImGui.TextDisabled("exportで出力したCSVを指定して、トリガーボックス/ラベル/トリガーを取り込みます。");
+        ImGui.TextDisabled("不正なCSV、既存IDとの重複、設定不可能な値がある場合はimportを中断します。");
+        ImGui.Separator();
+
+        if (ImGui.Button("CSVを指定", new Vector2(160.0f, 32.0f)))
+        {
+            if (NativeFileDialogService.TryOpenCsvFile(out var selectedPath))
+            {
+                this.importCsvPath = selectedPath;
+                this.triggerImportMessage = string.Empty;
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Import実行", new Vector2(160.0f, 32.0f)))
+        {
+            this.ImportTriggerCsv(this.importCsvPath);
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("選択中CSV");
+        ImGui.TextWrapped(string.IsNullOrWhiteSpace(this.importCsvPath) ? "未選択" : this.importCsvPath);
+
+        if (!string.IsNullOrWhiteSpace(this.triggerImportMessage))
+        {
+            var color = this.triggerImportMessage.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+                ? new Vector4(1.0f, 0.25f, 0.25f, 1.0f)
+                : new Vector4(0.25f, 1.0f, 0.45f, 1.0f);
+            ImGui.TextColored(color, this.triggerImportMessage);
+        }
+    }
+
+    private void DrawTriggerBoxAndLabelEditor()
+    {
+        ImGui.Spacing();
+        ImGui.Text("トリガーボックス作成");
+        ImGui.SetNextItemWidth(360.0f);
+        if (InputTextJapanese("ボックス名", ref this.newTriggerBoxName, 256))
+        {
+            this.newTriggerBoxName = RemoveLineBreaks(this.newTriggerBoxName);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("ボックスを追加", new Vector2(150.0f, 0.0f)))
+        {
+            var name = this.newTriggerBoxName.Trim();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var boxId = this.GenerateNextManagementId("BOX");
+                this.configuration.TriggerBoxes.Add(new TriggerBoxSetting
+                {
+                    BoxId = boxId,
+                    Name = name,
+                });
+
+                this.selectedManagementBoxId = boxId;
+                this.selectedManagementLabelBoxId = boxId;
+                this.newTriggerBoxName = string.Empty;
+                this.saveConfig();
+            }
+        }
+
+        this.DrawTriggerBoxTable();
+
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text("トリガーラベル作成");
+
+        this.DrawBoxComboForLabelCreate();
+
+        ImGui.SetNextItemWidth(360.0f);
+        if (InputTextJapanese("ラベル名", ref this.newTriggerLabelName, 256))
+        {
+            this.newTriggerLabelName = RemoveLineBreaks(this.newTriggerLabelName);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("ラベルを追加", new Vector2(150.0f, 0.0f)))
+        {
+            var name = this.newTriggerLabelName.Trim();
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(this.selectedManagementLabelBoxId))
+            {
+                this.configuration.TriggerLabels.Add(new TriggerLabelSetting
+                {
+                    LabelId = this.GenerateNextManagementId("Lab"),
+                    BoxId = this.selectedManagementLabelBoxId,
+                    Name = name,
+                });
+
+                this.newTriggerLabelName = string.Empty;
+                this.saveConfig();
+            }
+        }
+
+        this.DrawTriggerLabelTable();
+    }
+
+    private void DrawBoxComboForLabelCreate()
+    {
+        if (this.configuration.TriggerBoxes.Count == 0)
+        {
+            this.selectedManagementLabelBoxId = string.Empty;
+            ImGui.TextDisabled("先にトリガーボックスを作成してください。");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(this.selectedManagementLabelBoxId)
+            || !this.configuration.TriggerBoxes.Any(box => string.Equals(box.BoxId, this.selectedManagementLabelBoxId, StringComparison.OrdinalIgnoreCase)))
+        {
+            this.selectedManagementLabelBoxId = this.configuration.TriggerBoxes[0].BoxId;
+        }
+
+        var selectedName = this.GetTriggerBoxDisplayName(this.selectedManagementLabelBoxId, "名称未設定");
+        ImGui.SetNextItemWidth(360.0f);
+        if (ImGui.BeginCombo("所属ボックス", selectedName))
+        {
+            foreach (var box in this.configuration.TriggerBoxes)
+            {
+                var isSelected = string.Equals(this.selectedManagementLabelBoxId, box.BoxId, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(this.GetTriggerBoxDisplayName(box.BoxId, "名称未設定"), isSelected))
+                {
+                    this.selectedManagementLabelBoxId = box.BoxId;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+    }
+
+    private void DrawTriggerBoxTable()
+    {
+        if (this.configuration.TriggerBoxes.Count == 0)
+        {
+            ImGui.TextDisabled("保存済みのトリガーボックスはありません。");
+            return;
+        }
+
+        if (ImGui.BeginTable("HappyTriggerBoxTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("名称");
+            ImGui.TableSetupColumn("ラベル数", ImGuiTableColumnFlags.WidthFixed, 80.0f);
+            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 150.0f);
+            ImGui.TableHeadersRow();
+
+            for (var i = 0; i < this.configuration.TriggerBoxes.Count; i++)
+            {
+                var box = this.configuration.TriggerBoxes[i];
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(box.BoxId);
+
+                ImGui.TableSetColumnIndex(1);
+                var name = box.Name ?? string.Empty;
+                ImGui.SetNextItemWidth(-1.0f);
+                if (InputTextJapanese($"##box_name_{i}", ref name, 256))
+                {
+                    box.Name = RemoveLineBreaks(name);
+                    this.saveConfig();
+                }
+
+                ImGui.TableSetColumnIndex(2);
+                var labelCount = this.configuration.TriggerLabels.Count(label => string.Equals(label.BoxId, box.BoxId, StringComparison.OrdinalIgnoreCase));
+                ImGui.TextUnformatted(labelCount.ToString());
+
+                ImGui.TableSetColumnIndex(3);
+                if (ImGui.SmallButton($"削除##box_delete_{i}"))
+                {
+                    this.RemoveTriggerBox(box.BoxId);
+                    ImGui.EndTable();
+                    return;
+                }
+            }
+
+            ImGui.EndTable();
+        }
+    }
+
+    private void DrawTriggerLabelTable()
+    {
+        if (this.configuration.TriggerLabels.Count == 0)
+        {
+            ImGui.TextDisabled("保存済みのトリガーラベルはありません。");
+            return;
+        }
+
+        if (ImGui.BeginTable("HappyTriggerLabelTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("所属ボックス", ImGuiTableColumnFlags.WidthFixed, 220.0f);
+            ImGui.TableSetupColumn("名称");
+            ImGui.TableSetupColumn("トリガー数", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 150.0f);
+            ImGui.TableHeadersRow();
+
+            for (var i = 0; i < this.configuration.TriggerLabels.Count; i++)
+            {
+                var label = this.configuration.TriggerLabels[i];
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(label.LabelId);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted(this.GetTriggerBoxDisplayName(label.BoxId, "不明なBOX"));
+
+                ImGui.TableSetColumnIndex(2);
+                var name = label.Name ?? string.Empty;
+                ImGui.SetNextItemWidth(-1.0f);
+                if (InputTextJapanese($"##label_name_{i}", ref name, 256))
+                {
+                    label.Name = RemoveLineBreaks(name);
+                    this.saveConfig();
+                }
+
+                ImGui.TableSetColumnIndex(3);
+                ImGui.TextUnformatted(this.GetAllTriggers().Count(trigger => string.Equals(trigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase)).ToString());
+
+                ImGui.TableSetColumnIndex(4);
+                if (ImGui.SmallButton($"削除##label_delete_{i}"))
+                {
+                    this.RemoveTriggerLabel(label.LabelId);
+                    ImGui.EndTable();
+                    return;
+                }
+            }
+
+            ImGui.EndTable();
+        }
+    }
+
+    private void DrawTriggerManagementTree()
+    {
+        ImGui.TextDisabled("ボックス、ラベル、トリガーの階層を確認できます。トリガーの所属はログトリガータブの管理設定で変更できます。");
+        ImGui.TextDisabled("トリガー名をクリックすると、保存済み設定の詳細を確認できます。各トリガーの右側からテスト・編集・削除もできます。");
+        ImGui.TextDisabled("トリガーボックス右側の export ボタンで、そのボックス配下のトリガーをCSV出力できます。");
+
+        if (!string.IsNullOrWhiteSpace(this.triggerBoxExportMessage))
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.92f, 0.25f, 1.0f), this.triggerBoxExportMessage);
+        }
+
+        ImGui.Separator();
+
+        foreach (var box in this.configuration.TriggerBoxes)
+        {
+            var boxHeader = this.GetTriggerBoxDisplayName(box.BoxId, "名称未設定");
+            var isOpen = ImGui.TreeNode(boxHeader);
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"export##box_export_{box.BoxId}"))
+            {
+                this.ExportTriggerBoxToCsv(box);
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("このトリガーボックス配下のトリガーをCSV形式で出力します。");
+            }
+
+            if (isOpen)
+            {
+                foreach (var label in this.configuration.TriggerLabels.Where(label => string.Equals(label.BoxId, box.BoxId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var labelHeader = this.GetTriggerLabelDisplayName(label.LabelId, "名称未設定");
+                    if (ImGui.TreeNode(labelHeader))
+                    {
+                        if (this.DrawTriggerTreeRowsForLabel(label.LabelId))
+                        {
+                            ImGui.TreePop();
+                            ImGui.TreePop();
+                            return;
+                        }
+
+                        ImGui.TreePop();
+                    }
+                }
+
+                var directTriggers = this.GetAllTriggers()
+                    .Where(trigger => string.Equals(trigger.TriggerBoxId, box.BoxId, StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrWhiteSpace(trigger.TriggerLabelId))
+                    .ToList();
+
+                if (directTriggers.Count > 0 && ImGui.TreeNode("ラベル未設定"))
+                {
+                    foreach (var trigger in directTriggers)
+                    {
+                        if (this.DrawTriggerTreeRow(trigger))
+                        {
+                            ImGui.TreePop();
+                            ImGui.TreePop();
+                            return;
+                        }
+                    }
+
+                    ImGui.TreePop();
+                }
+
+                ImGui.TreePop();
+            }
+        }
+
+        var unassignedTriggers = this.GetAllTriggers()
+            .Where(trigger => string.IsNullOrWhiteSpace(trigger.TriggerBoxId) && string.IsNullOrWhiteSpace(trigger.TriggerLabelId))
+            .ToList();
+
+        if (unassignedTriggers.Count > 0 && ImGui.TreeNode("未分類"))
+        {
+            foreach (var trigger in unassignedTriggers)
+            {
+                if (this.DrawTriggerTreeRow(trigger))
+                {
+                    ImGui.TreePop();
+                    return;
+                }
+            }
+
+            ImGui.TreePop();
+        }
+    }
+
+    private void ExportTriggerBoxToCsv(TriggerBoxSetting box)
+    {
+        try
+        {
+            var boxId = box.BoxId ?? string.Empty;
+            var boxName = string.IsNullOrWhiteSpace(box.Name) ? "名称未設定" : box.Name.Trim();
+            var exportedAt = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            var fileName = $"HappyTrigger_{MakeSafeFileName(boxId)}_{MakeSafeFileName(boxName)}_{exportedAt}.csv";
+            var exportDirectory = Path.Combine(Plugin.PluginInterface.ConfigDirectory.FullName, "exports");
+            Directory.CreateDirectory(exportDirectory);
+
+            var filePath = Path.Combine(exportDirectory, fileName);
+            var triggers = this.GetAllTriggers()
+                .Where(trigger => string.Equals(trigger.TriggerBoxId, boxId, StringComparison.OrdinalIgnoreCase))
+                .Select(trigger => new
+                {
+                    Trigger = trigger,
+                    Location = this.TryFindTriggerLocation(trigger, out var listKind, out var index)
+                        ? new TriggerExportLocation(listKind, index)
+                        : new TriggerExportLocation(TriggerListKind.Image, -1),
+                })
+                .OrderBy(item => item.Trigger.TriggerLabelId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Trigger.TriggerId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var csv = new StringBuilder();
+            csv.AppendLine(string.Join(",", ExportCsvHeaders.Select(EscapeCsv)));
+
+            foreach (var item in triggers)
+            {
+                var trigger = item.Trigger;
+                var values = this.GetTriggerExportCsvValues(trigger, item.Location.ListKind, item.Location.Index, boxId, boxName);
+                csv.AppendLine(string.Join(",", values.Select(EscapeCsv)));
+            }
+
+            File.WriteAllText(filePath, csv.ToString(), new UTF8Encoding(true));
+            this.triggerBoxExportMessage = $"CSV export完了: {filePath}";
+        }
+        catch (Exception ex)
+        {
+            this.triggerBoxExportMessage = $"CSV export失敗: {ex.Message}";
+        }
+    }
+
+    private sealed class TriggerExportLocation
+    {
+        public TriggerExportLocation(TriggerListKind listKind, int index)
+        {
+            this.ListKind = listKind;
+            this.Index = index;
+        }
+
+        public TriggerListKind ListKind { get; }
+
+        public int Index { get; }
+    }
+
+    private static readonly string[] ExportCsvHeaders =
+    {
+        "TriggerListKind",
+        "TriggerIndex",
+        "TriggerId",
+        "TriggerName",
+        "Enabled",
+        "TriggerBoxId",
+        "TriggerBoxName",
+        "TriggerLabelId",
+        "TriggerLabelName",
+        "Keyword",
+        "ExactMatch",
+        "UseFfxivLogReference",
+        "UsePrerequisite",
+        "PrerequisiteTriggerId",
+        "EnableStatusRemainingAppend",
+        "StatusRemainingJob",
+        "StatusRemainingStatusName",
+        "BattleLogKeyword",
+        "InternalLogKeyword",
+        "InternalLogKeywords",
+        "DisplayTextMode",
+        "DisplayText",
+        "EnableVoiceVox",
+        "VoiceVoxEndpoint",
+        "VoiceVoxSpeakerId",
+        "IsWebImage",
+        "ImagePath",
+        "PositionX",
+        "PositionY",
+        "WaitSeconds",
+        "ImageSize",
+        "UseOriginalImageSize",
+        "ImageWidth",
+        "ImageHeight",
+        "UsePercentScale",
+        "ScalePercent",
+        "TextSize",
+        "TextFontDesign",
+        "EnableTextPixelSnap",
+        "TextShadowOffsetX",
+        "TextShadowOffsetY",
+        "TextShadowColorR",
+        "TextShadowColorG",
+        "TextShadowColorB",
+        "TextShadowColorA",
+        "TextColorR",
+        "TextColorG",
+        "TextColorB",
+        "TextColorA",
+        "EnableTextOutline",
+        "TextOutlineThickness",
+        "TextOutlineColorR",
+        "TextOutlineColorG",
+        "TextOutlineColorB",
+        "TextOutlineColorA",
+        "EnableTextFadeIn",
+        "TextFadeInSeconds",
+        "DisplaySeconds",
+    };
+
+    private IEnumerable<string> GetTriggerExportCsvValues(
+        HappyTriggerSetting trigger,
+        TriggerListKind listKind,
+        int index,
+        string boxId,
+        string boxName)
+    {
+        var labelName = string.IsNullOrWhiteSpace(trigger.TriggerLabelId)
+            ? string.Empty
+            : this.GetTriggerLabelNameOnly(trigger.TriggerLabelId, "名称未設定");
+
+        return new[]
+        {
+            GetTriggerListKindKey(listKind),
+            index.ToString(CultureInfo.InvariantCulture),
+            trigger.TriggerId ?? string.Empty,
+            string.IsNullOrWhiteSpace(trigger.TriggerName) ? "名称未設定" : trigger.TriggerName.Trim(),
+            trigger.Enabled ? "Enabled" : "Disabled",
+            boxId,
+            boxName,
+            trigger.TriggerLabelId ?? string.Empty,
+            labelName,
+            trigger.Keyword ?? string.Empty,
+            BoolText(trigger.ExactMatch),
+            BoolText(trigger.UseFfxivLogReference),
+            BoolText(trigger.UsePrerequisite),
+            trigger.PrerequisiteTriggerId ?? string.Empty,
+            BoolText(trigger.EnableStatusRemainingAppend),
+            trigger.StatusRemainingJob ?? string.Empty,
+            trigger.StatusRemainingStatusName ?? string.Empty,
+            trigger.BattleLogKeyword ?? string.Empty,
+            trigger.InternalLogKeyword ?? string.Empty,
+            string.Join(HappyTriggerSetting.InternalLogKeywordDelimiter, trigger.GetInternalLogKeywords()),
+            BoolText(trigger.DisplayTextMode),
+            trigger.DisplayText ?? string.Empty,
+            BoolText(trigger.EnableVoiceVox),
+            string.IsNullOrWhiteSpace(trigger.VoiceVoxEndpoint) ? "http://127.0.0.1:50021" : trigger.VoiceVoxEndpoint.Trim(),
+            trigger.VoiceVoxSpeakerId.ToString(CultureInfo.InvariantCulture),
+            BoolText(trigger.IsWebImage),
+            trigger.ImagePath ?? string.Empty,
+            FloatText(trigger.PositionX),
+            FloatText(trigger.PositionY),
+            FloatText(trigger.WaitSeconds),
+            FloatText(trigger.ImageSize),
+            BoolText(trigger.UseOriginalImageSize),
+            FloatText(trigger.ImageWidth),
+            FloatText(trigger.ImageHeight),
+            BoolText(trigger.UsePercentScale),
+            FloatText(trigger.ScalePercent),
+            FloatText(trigger.TextSize),
+            trigger.TextFontDesign.ToString(),
+            BoolText(trigger.EnableTextPixelSnap),
+            FloatText(trigger.TextShadowOffsetX),
+            FloatText(trigger.TextShadowOffsetY),
+            FloatText(trigger.TextShadowColorR),
+            FloatText(trigger.TextShadowColorG),
+            FloatText(trigger.TextShadowColorB),
+            FloatText(trigger.TextShadowColorA),
+            FloatText(trigger.TextColorR),
+            FloatText(trigger.TextColorG),
+            FloatText(trigger.TextColorB),
+            FloatText(trigger.TextColorA),
+            BoolText(trigger.EnableTextOutline),
+            FloatText(trigger.TextOutlineThickness),
+            FloatText(trigger.TextOutlineColorR),
+            FloatText(trigger.TextOutlineColorG),
+            FloatText(trigger.TextOutlineColorB),
+            FloatText(trigger.TextOutlineColorA),
+            BoolText(trigger.EnableTextFadeIn),
+            FloatText(trigger.TextFadeInSeconds),
+            FloatText(trigger.DisplaySeconds),
+        };
+    }
+
+    private string GetTriggerLabelNameOnly(string? labelId, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(labelId))
+        {
+            return string.Empty;
+        }
+
+        var label = this.configuration.TriggerLabels.FirstOrDefault(label => string.Equals(label.LabelId, labelId, StringComparison.OrdinalIgnoreCase));
+        if (label == null)
+        {
+            return "不明";
+        }
+
+        return string.IsNullOrWhiteSpace(label.Name) ? fallback : label.Name.Trim();
+    }
+
+    private static string EscapeCsv(string? value)
+    {
+        var text = value ?? string.Empty;
+        var mustQuote = text.Contains(',') || text.Contains('"') || text.Contains('\r') || text.Contains('\n');
+        text = text.Replace("\"", "\"\"");
+        return mustQuote ? $"\"{text}\"" : text;
+    }
+
+    private static string MakeSafeFileName(string value)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? "名称未設定" : value.Trim();
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            text = text.Replace(invalidChar, '_');
+        }
+
+        return text;
+    }
+
+    private static string BoolText(bool value)
+    {
+        return value ? "TRUE" : "FALSE";
+    }
+
+    private static string FloatText(float value)
+    {
+        return value.ToString(CultureInfo.InvariantCulture);
+    }
+
+
+    private sealed class IllegalImportException : Exception
+    {
+        public IllegalImportException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    private sealed class ImportRow
+    {
+        public TriggerListKind ListKind { get; init; }
+
+        public HappyTriggerSetting Trigger { get; init; } = new();
+
+        public string BoxId { get; init; } = string.Empty;
+
+        public string BoxName { get; init; } = string.Empty;
+
+        public string LabelId { get; init; } = string.Empty;
+
+        public string LabelName { get; init; } = string.Empty;
+    }
+
+    private void ImportTriggerCsv(string filePath)
+    {
+        try
+        {
+            var rows = this.LoadAndValidateImportCsv(filePath);
+
+            var boxesToAdd = rows
+                .GroupBy(row => row.BoxId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new TriggerBoxSetting
+                {
+                    BoxId = group.Key,
+                    Name = group.First().BoxName,
+                })
+                .ToList();
+
+            var labelsToAdd = rows
+                .Where(row => !string.IsNullOrWhiteSpace(row.LabelId))
+                .GroupBy(row => row.LabelId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new TriggerLabelSetting
+                {
+                    LabelId = group.Key,
+                    BoxId = group.First().BoxId,
+                    Name = group.First().LabelName,
+                })
+                .ToList();
+
+            foreach (var box in boxesToAdd)
+            {
+                this.configuration.TriggerBoxes.Add(box);
+            }
+
+            foreach (var label in labelsToAdd)
+            {
+                this.configuration.TriggerLabels.Add(label);
+            }
+
+            foreach (var row in rows)
+            {
+                var trigger = row.Trigger.Clone();
+                if (row.ListKind == TriggerListKind.FfxivLog)
+                {
+                    this.configuration.FfxivLogTriggers.Add(trigger);
+                }
+                else if (row.ListKind == TriggerListKind.Text)
+                {
+                    this.configuration.TextTriggers.Add(trigger);
+                }
+                else
+                {
+                    this.configuration.Triggers.Add(trigger);
+                }
+            }
+
+            this.saveConfig();
+            this.selectedManagementTriggerKey = string.Empty;
+            this.triggerImportMessage = $"CSV import完了: {rows.Count}件";
+        }
+        catch (IllegalImportException)
+        {
+            this.triggerImportMessage = "[ERROR]IllegalImportException : 不正なcsvファイルを指定しています。";
+        }
+        catch
+        {
+            this.triggerImportMessage = "[ERROR]IllegalImportException : 不正なcsvファイルを指定しています。";
+        }
+    }
+
+    private List<ImportRow> LoadAndValidateImportCsv(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            throw new IllegalImportException("CSVファイルが見つかりません。");
+        }
+
+        if (!string.Equals(Path.GetExtension(filePath), ".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IllegalImportException("CSV以外のファイルが指定されています。");
+        }
+
+        var csvText = File.ReadAllText(filePath, Encoding.UTF8);
+        var table = ParseCsv(csvText);
+        if (table.Count < 2)
+        {
+            throw new IllegalImportException("CSVにデータ行がありません。");
+        }
+
+        var headers = table[0].Select(header => (header ?? string.Empty).Trim().TrimStart('\ufeff')).ToList();
+        if (headers.Count != ExportCsvHeaders.Length)
+        {
+            throw new IllegalImportException("CSVヘッダー数が一致しません。");
+        }
+
+        var headerSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header) || !headerSet.Add(header))
+            {
+                throw new IllegalImportException("CSVヘッダーが不正です。");
+            }
+        }
+
+        foreach (var requiredHeader in ExportCsvHeaders)
+        {
+            if (!headerSet.Contains(requiredHeader))
+            {
+                throw new IllegalImportException("CSVヘッダーが不足しています。");
+            }
+        }
+
+        var savedTriggerIds = new HashSet<string>(this.GetAllTriggers().Select(trigger => trigger.TriggerId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
+        var savedBoxIds = new HashSet<string>(this.configuration.TriggerBoxes.Select(box => box.BoxId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
+        var savedLabelIds = new HashSet<string>(this.configuration.TriggerLabels.Select(label => label.LabelId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
+        var importTriggerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var importBoxNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var importLabelRows = new Dictionary<string, ImportRow>(StringComparer.OrdinalIgnoreCase);
+        var rows = new List<ImportRow>();
+
+        for (var rowIndex = 1; rowIndex < table.Count; rowIndex++)
+        {
+            var columns = table[rowIndex];
+            if (columns.Count == 1 && string.IsNullOrWhiteSpace(columns[0]))
+            {
+                continue;
+            }
+
+            if (columns.Count != headers.Count)
+            {
+                throw new IllegalImportException("CSV行の列数が一致しません。");
+            }
+
+            var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var columnIndex = 0; columnIndex < headers.Count; columnIndex++)
+            {
+                row[headers[columnIndex]] = columns[columnIndex] ?? string.Empty;
+            }
+
+            var listKind = ParseTriggerListKind(GetRequired(row, "TriggerListKind"));
+            var triggerId = GetRequired(row, "TriggerId").Trim();
+            var trigger = new HappyTriggerSetting
+            {
+                TriggerId = triggerId,
+                TriggerName = NormalizeImportedName(GetRequired(row, "TriggerName")),
+                Enabled = ParseEnabled(GetRequired(row, "Enabled")),
+                TriggerBoxId = GetRequired(row, "TriggerBoxId").Trim(),
+                TriggerLabelId = Get(row, "TriggerLabelId").Trim(),
+                Keyword = Get(row, "Keyword"),
+                ExactMatch = ParseBool(GetRequired(row, "ExactMatch")),
+                UseFfxivLogReference = ParseBool(GetRequired(row, "UseFfxivLogReference")),
+                UsePrerequisite = ParseBool(GetRequired(row, "UsePrerequisite")),
+                PrerequisiteTriggerId = Get(row, "PrerequisiteTriggerId").Trim(),
+                EnableStatusRemainingAppend = ParseBool(GetRequired(row, "EnableStatusRemainingAppend")),
+                StatusRemainingJob = Get(row, "StatusRemainingJob").Trim(),
+                StatusRemainingStatusName = Get(row, "StatusRemainingStatusName").Trim(),
+                BattleLogKeyword = Get(row, "BattleLogKeyword"),
+                InternalLogKeyword = Get(row, "InternalLogKeyword"),
+                DisplayTextMode = ParseBool(GetRequired(row, "DisplayTextMode")),
+                DisplayText = Get(row, "DisplayText"),
+                EnableVoiceVox = ParseBool(GetRequired(row, "EnableVoiceVox")),
+                VoiceVoxEndpoint = GetRequired(row, "VoiceVoxEndpoint").Trim(),
+                VoiceVoxSpeakerId = ParseInt(GetRequired(row, "VoiceVoxSpeakerId")),
+                IsWebImage = ParseBool(GetRequired(row, "IsWebImage")),
+                ImagePath = Get(row, "ImagePath"),
+                PositionX = ParseFloat(GetRequired(row, "PositionX")),
+                PositionY = ParseFloat(GetRequired(row, "PositionY")),
+                WaitSeconds = ParseFloat(GetRequired(row, "WaitSeconds")),
+                ImageSize = ParseFloat(GetRequired(row, "ImageSize")),
+                UseOriginalImageSize = ParseBool(GetRequired(row, "UseOriginalImageSize")),
+                ImageWidth = ParseFloat(GetRequired(row, "ImageWidth")),
+                ImageHeight = ParseFloat(GetRequired(row, "ImageHeight")),
+                UsePercentScale = ParseBool(GetRequired(row, "UsePercentScale")),
+                ScalePercent = ParseFloat(GetRequired(row, "ScalePercent")),
+                TextSize = ParseFloat(GetRequired(row, "TextSize")),
+                TextFontDesign = ParseTextFontDesign(GetRequired(row, "TextFontDesign")),
+                EnableTextPixelSnap = ParseBool(GetRequired(row, "EnableTextPixelSnap")),
+                TextShadowOffsetX = ParseFloat(GetRequired(row, "TextShadowOffsetX")),
+                TextShadowOffsetY = ParseFloat(GetRequired(row, "TextShadowOffsetY")),
+                TextShadowColorR = ParseFloat(GetRequired(row, "TextShadowColorR")),
+                TextShadowColorG = ParseFloat(GetRequired(row, "TextShadowColorG")),
+                TextShadowColorB = ParseFloat(GetRequired(row, "TextShadowColorB")),
+                TextShadowColorA = ParseFloat(GetRequired(row, "TextShadowColorA")),
+                TextColorR = ParseFloat(GetRequired(row, "TextColorR")),
+                TextColorG = ParseFloat(GetRequired(row, "TextColorG")),
+                TextColorB = ParseFloat(GetRequired(row, "TextColorB")),
+                TextColorA = ParseFloat(GetRequired(row, "TextColorA")),
+                EnableTextOutline = ParseBool(GetRequired(row, "EnableTextOutline")),
+                TextOutlineThickness = ParseFloat(GetRequired(row, "TextOutlineThickness")),
+                TextOutlineColorR = ParseFloat(GetRequired(row, "TextOutlineColorR")),
+                TextOutlineColorG = ParseFloat(GetRequired(row, "TextOutlineColorG")),
+                TextOutlineColorB = ParseFloat(GetRequired(row, "TextOutlineColorB")),
+                TextOutlineColorA = ParseFloat(GetRequired(row, "TextOutlineColorA")),
+                EnableTextFadeIn = ParseBool(GetRequired(row, "EnableTextFadeIn")),
+                TextFadeInSeconds = ParseFloat(GetRequired(row, "TextFadeInSeconds")),
+                DisplaySeconds = ParseFloat(GetRequired(row, "DisplaySeconds")),
+            };
+
+            trigger.SetInternalLogKeywordText(Get(row, "InternalLogKeywords"));
+            if (trigger.GetInternalLogKeywords().Count == 0 && !string.IsNullOrWhiteSpace(trigger.InternalLogKeyword))
+            {
+                trigger.SetInternalLogKeywordText(trigger.InternalLogKeyword);
+            }
+
+            ValidateImportedTriggerKind(listKind, trigger);
+            ValidateImportedTriggerValues(trigger);
+
+            if (savedTriggerIds.Contains(trigger.TriggerId) || !importTriggerIds.Add(trigger.TriggerId))
+            {
+                throw new IllegalImportException("トリガーIDが重複しています。");
+            }
+
+            var boxId = trigger.TriggerBoxId.Trim();
+            var boxName = NormalizeImportedName(GetRequired(row, "TriggerBoxName"));
+            if (!HappyTriggerSetting.TryGetManagementIdNumber(boxId, "BOX", out _))
+            {
+                throw new IllegalImportException("トリガーボックスIDが不正です。");
+            }
+
+            if (savedBoxIds.Contains(boxId))
+            {
+                throw new IllegalImportException("トリガーボックスIDが既に存在します。");
+            }
+
+            if (importBoxNames.TryGetValue(boxId, out var existingBoxName))
+            {
+                if (!string.Equals(existingBoxName, boxName, StringComparison.Ordinal))
+                {
+                    throw new IllegalImportException("同一ボックスIDに異なる名称が設定されています。");
+                }
+            }
+            else
+            {
+                importBoxNames[boxId] = boxName;
+            }
+
+            var labelId = trigger.TriggerLabelId.Trim();
+            var labelName = NormalizeImportedName(Get(row, "TriggerLabelName"));
+            if (!string.IsNullOrWhiteSpace(labelId))
+            {
+                if (!HappyTriggerSetting.TryGetManagementIdNumber(labelId, "Lab", out _))
+                {
+                    throw new IllegalImportException("トリガーラベルIDが不正です。");
+                }
+
+                if (savedLabelIds.Contains(labelId))
+                {
+                    throw new IllegalImportException("トリガーラベルIDが既に存在します。");
+                }
+
+            }
+
+            var importRow = new ImportRow
+            {
+                ListKind = listKind,
+                Trigger = trigger,
+                BoxId = boxId,
+                BoxName = boxName,
+                LabelId = labelId,
+                LabelName = labelName,
+            };
+
+            if (!string.IsNullOrWhiteSpace(labelId))
+            {
+                if (importLabelRows.TryGetValue(labelId, out var existingLabelRow))
+                {
+                    if (!string.Equals(existingLabelRow.BoxId, boxId, StringComparison.OrdinalIgnoreCase)
+                        || !string.Equals(existingLabelRow.LabelName, labelName, StringComparison.Ordinal))
+                    {
+                        throw new IllegalImportException("同一ラベルIDに異なる情報が設定されています。");
+                    }
+                }
+                else
+                {
+                    importLabelRows[labelId] = importRow;
+                }
+            }
+
+            rows.Add(importRow);
+        }
+
+        if (rows.Count == 0)
+        {
+            throw new IllegalImportException("import対象のトリガーがありません。");
+        }
+
+        var allImportTriggerIds = rows.Select(row => row.Trigger.TriggerId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            if (row.Trigger.UsePrerequisite && !string.IsNullOrWhiteSpace(row.Trigger.PrerequisiteTriggerId))
+            {
+                if (!savedTriggerIds.Contains(row.Trigger.PrerequisiteTriggerId) && !allImportTriggerIds.Contains(row.Trigger.PrerequisiteTriggerId))
+                {
+                    throw new IllegalImportException("前提トリガーIDが存在しません。");
+                }
+            }
+        }
+
+        return rows;
+    }
+
+    private static List<List<string>> ParseCsv(string csvText)
+    {
+        var rows = new List<List<string>>();
+        var row = new List<string>();
+        var field = new StringBuilder();
+        var inQuotes = false;
+
+        for (var i = 0; i < csvText.Length; i++)
+        {
+            var c = csvText[i];
+            if (inQuotes)
+            {
+                if (c == '"')
+                {
+                    if (i + 1 < csvText.Length && csvText[i + 1] == '"')
+                    {
+                        field.Append('"');
+                        i++;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    field.Append(c);
+                }
+            }
+            else
+            {
+                if (c == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (c == ',')
+                {
+                    row.Add(field.ToString());
+                    field.Clear();
+                }
+                else if (c == '\r')
+                {
+                    if (i + 1 < csvText.Length && csvText[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+
+                    row.Add(field.ToString());
+                    field.Clear();
+                    rows.Add(row);
+                    row = new List<string>();
+                }
+                else if (c == '\n')
+                {
+                    row.Add(field.ToString());
+                    field.Clear();
+                    rows.Add(row);
+                    row = new List<string>();
+                }
+                else
+                {
+                    field.Append(c);
+                }
+            }
+        }
+
+        if (inQuotes)
+        {
+            throw new IllegalImportException("CSVのクォートが閉じられていません。");
+        }
+
+        row.Add(field.ToString());
+        if (row.Count > 1 || !string.IsNullOrWhiteSpace(row[0]) || rows.Count == 0)
+        {
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static string GetRequired(IReadOnlyDictionary<string, string> row, string key)
+    {
+        var value = Get(row, key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new IllegalImportException($"必須項目が不足しています: {key}");
+        }
+
+        return value;
+    }
+
+    private static string Get(IReadOnlyDictionary<string, string> row, string key)
+    {
+        return row.TryGetValue(key, out var value) ? value ?? string.Empty : string.Empty;
+    }
+
+    private static string NormalizeImportedName(string value)
+    {
+        var trimmed = RemoveLineBreaks(value ?? string.Empty).Trim();
+        return string.Equals(trimmed, "名称未設定", StringComparison.OrdinalIgnoreCase) ? string.Empty : trimmed;
+    }
+
+    private static TriggerListKind ParseTriggerListKind(string value)
+    {
+        var normalized = value.Trim();
+        if (string.Equals(normalized, "image", StringComparison.OrdinalIgnoreCase))
+        {
+            return TriggerListKind.Image;
+        }
+
+        if (string.Equals(normalized, "text", StringComparison.OrdinalIgnoreCase))
+        {
+            return TriggerListKind.Text;
+        }
+
+        if (string.Equals(normalized, "ffxivlog", StringComparison.OrdinalIgnoreCase))
+        {
+            return TriggerListKind.FfxivLog;
+        }
+
+        throw new IllegalImportException("TriggerListKindが不正です。");
+    }
+
+    private static bool ParseEnabled(string value)
+    {
+        if (string.Equals(value.Trim(), "Enabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(value.Trim(), "Disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        throw new IllegalImportException("Enabledが不正です。");
+    }
+
+    private static bool ParseBool(string value)
+    {
+        var trimmed = value.Trim();
+        if (string.Equals(trimmed, "TRUE", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "ON", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(trimmed, "FALSE", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "OFF", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        throw new IllegalImportException("bool値が不正です。");
+    }
+
+    private static int ParseInt(string value)
+    {
+        if (!int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var result))
+        {
+            throw new IllegalImportException("整数値が不正です。");
+        }
+
+        return result;
+    }
+
+    private static float ParseFloat(string value)
+    {
+        if (!float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
+        {
+            throw new IllegalImportException("数値が不正です。");
+        }
+
+        if (float.IsNaN(result) || float.IsInfinity(result))
+        {
+            throw new IllegalImportException("数値が不正です。");
+        }
+
+        return result;
+    }
+
+    private static TextFontDesign ParseTextFontDesign(string value)
+    {
+        if (!Enum.TryParse<TextFontDesign>(value.Trim(), true, out var result) || !Enum.IsDefined(typeof(TextFontDesign), result))
+        {
+            throw new IllegalImportException("フォント設定が不正です。");
+        }
+
+        return result;
+    }
+
+    private static void ValidateImportedTriggerKind(TriggerListKind listKind, HappyTriggerSetting trigger)
+    {
+        if (listKind == TriggerListKind.Image)
+        {
+            if (!HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "I") || trigger.DisplayTextMode || trigger.UseFfxivLogReference)
+            {
+                throw new IllegalImportException("画像トリガー情報が不正です。");
+            }
+        }
+        else if (listKind == TriggerListKind.Text)
+        {
+            if (!HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "T") || !trigger.DisplayTextMode || trigger.UseFfxivLogReference)
+            {
+                throw new IllegalImportException("テキストトリガー情報が不正です。");
+            }
+        }
+        else
+        {
+            var isValidFfxivLogId = HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "F")
+                || HappyTriggerSetting.IsValidTriggerId(trigger.TriggerId, "X");
+            if (!isValidFfxivLogId || !trigger.UseFfxivLogReference)
+            {
+                throw new IllegalImportException("FFXIV Logトリガー情報が不正です。");
+            }
+        }
+    }
+
+    private static void ValidateImportedTriggerValues(HappyTriggerSetting trigger)
+    {
+        if (string.IsNullOrWhiteSpace(trigger.TriggerBoxId))
+        {
+            throw new IllegalImportException("所属ボックスIDが不足しています。");
+        }
+
+        if (trigger.WaitSeconds < 0.0f || trigger.WaitSeconds > 600.0f)
+        {
+            throw new IllegalImportException("待機時間が範囲外です。");
+        }
+
+        if (trigger.DisplaySeconds <= 0.0f || trigger.DisplaySeconds > 3600.0f)
+        {
+            throw new IllegalImportException("表示時間が範囲外です。");
+        }
+
+        if (trigger.ImageWidth <= 0.0f || trigger.ImageHeight <= 0.0f || trigger.ImageSize <= 0.0f || trigger.ScalePercent <= 0.0f)
+        {
+            throw new IllegalImportException("画像サイズ設定が不正です。");
+        }
+
+        if (trigger.TextSize < 8.0f || trigger.TextSize > 256.0f)
+        {
+            throw new IllegalImportException("テキストサイズが範囲外です。");
+        }
+
+        ValidateColor(trigger.TextShadowColorR, trigger.TextShadowColorG, trigger.TextShadowColorB, trigger.TextShadowColorA);
+        ValidateColor(trigger.TextColorR, trigger.TextColorG, trigger.TextColorB, trigger.TextColorA);
+        ValidateColor(trigger.TextOutlineColorR, trigger.TextOutlineColorG, trigger.TextOutlineColorB, trigger.TextOutlineColorA);
+
+        if (trigger.UseFfxivLogReference)
+        {
+            if (string.IsNullOrWhiteSpace(trigger.BattleLogKeyword) && trigger.GetInternalLogKeywords().Count == 0)
+            {
+                throw new IllegalImportException("FFXIV Log参照条件が不足しています。");
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(trigger.Keyword))
+            {
+                throw new IllegalImportException("トリガー文字が不足しています。");
+            }
+        }
+
+        if (trigger.DisplayTextMode)
+        {
+            if (string.IsNullOrWhiteSpace(trigger.DisplayText))
+            {
+                throw new IllegalImportException("表示テキストが不足しています。");
+            }
+
+            if (trigger.EnableVoiceVox)
+            {
+                if (string.IsNullOrWhiteSpace(trigger.VoiceVoxEndpoint)
+                    || !Uri.TryCreate(trigger.VoiceVoxEndpoint.Trim(), UriKind.Absolute, out var voiceVoxUri)
+                    || (voiceVoxUri.Scheme != Uri.UriSchemeHttp && voiceVoxUri.Scheme != Uri.UriSchemeHttps))
+                {
+                    throw new IllegalImportException("VOICEVOX URLが不正です。");
+                }
+
+                if (trigger.VoiceVoxSpeakerId < 0)
+                {
+                    throw new IllegalImportException("VOICEVOX Speaker IDが不正です。");
+                }
+            }
+        }
+        else
+        {
+            if (trigger.EnableVoiceVox)
+            {
+                throw new IllegalImportException("画像トリガーでVOICEVOX読み上げは使用できません。");
+            }
+
+            if (string.IsNullOrWhiteSpace(trigger.ImagePath))
+            {
+                throw new IllegalImportException("画像パスが不足しています。");
+            }
+
+            if (trigger.IsWebImage)
+            {
+                if (!Uri.TryCreate(trigger.ImagePath, UriKind.Absolute, out var uri)
+                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    throw new IllegalImportException("Web画像URLが不正です。");
+                }
+            }
+            else if (!File.Exists(trigger.ImagePath))
+            {
+                throw new IllegalImportException("ローカル画像ファイルが存在しません。");
+            }
+        }
+
+        if (trigger.EnableStatusRemainingAppend && (string.IsNullOrWhiteSpace(trigger.StatusRemainingJob) || string.IsNullOrWhiteSpace(trigger.StatusRemainingStatusName)))
+        {
+            throw new IllegalImportException("残り時間参照設定が不足しています。");
+        }
+    }
+
+    private static void ValidateColor(float r, float g, float b, float a)
+    {
+        if (r < 0.0f || r > 1.0f || g < 0.0f || g > 1.0f || b < 0.0f || b > 1.0f || a < 0.0f || a > 1.0f)
+        {
+            throw new IllegalImportException("色設定が範囲外です。");
+        }
+    }
+
+    private bool DrawTriggerTreeRowsForLabel(string labelId)
+    {
+        var triggers = this.GetAllTriggers()
+            .Where(trigger => string.Equals(trigger.TriggerLabelId, labelId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (triggers.Count == 0)
+        {
+            ImGui.TextDisabled("このラベルに所属しているトリガーはありません。");
+            return false;
+        }
+
+        foreach (var trigger in triggers)
+        {
+            if (this.DrawTriggerTreeRow(trigger))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool DrawTriggerTreeRow(HappyTriggerSetting trigger)
+    {
+        if (!this.TryFindTriggerLocation(trigger, out var listKind, out var index))
+        {
+            ImGui.BulletText(GetTriggerDisplayName(trigger));
+            return false;
+        }
+
+        var rowKey = GetManagementTriggerKey(trigger, listKind, index);
+        var isSelected = string.Equals(this.selectedManagementTriggerKey, rowKey, StringComparison.OrdinalIgnoreCase);
+        var displayName = GetTriggerDisplayName(trigger);
+
+        ImGui.Bullet();
+        ImGui.SameLine();
+
+        if (isSelected)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.92f, 0.25f, 1.0f));
+        }
+
+        ImGui.TextUnformatted(displayName);
+
+        if (isSelected)
+        {
+            ImGui.PopStyleColor();
+        }
+
+        if (ImGui.IsItemClicked())
+        {
+            this.selectedManagementTriggerKey = isSelected ? string.Empty : rowKey;
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(isSelected
+                ? "クリックすると、このトリガーの詳細表示を閉じます。"
+                : "クリックすると、このトリガーの保存済み設定を表示します。");
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"テスト##management_test_{rowKey}"))
+        {
+            this.testTrigger(trigger);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"編集##management_edit_{rowKey}"))
+        {
+            this.BeginEditTrigger(index, listKind, trigger);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"削除##management_delete_{rowKey}"))
+        {
+            this.DeleteTrigger(index, listKind);
+            return true;
+        }
+
+        if (isSelected)
+        {
+            this.DrawManagementTriggerDetail(trigger);
+        }
+
+        return false;
+    }
+
+    private void DrawManagementTriggerDetail(HappyTriggerSetting trigger)
+    {
+        ImGui.Indent(24.0f);
+
+        if (ImGui.BeginTable($"ManagementTriggerDetail_{this.selectedManagementTriggerKey}", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("項目", ImGuiTableColumnFlags.WidthFixed, 180.0f);
+            ImGui.TableSetupColumn("内容");
+
+            this.DrawTriggerDetailRow("有効", trigger.Enabled ? "Enabled" : "Disabled");
+            this.DrawTriggerDetailRow("ID", string.IsNullOrWhiteSpace(trigger.TriggerId) ? "未採番" : trigger.TriggerId);
+            this.DrawTriggerDetailRow("名称", string.IsNullOrWhiteSpace(trigger.TriggerName) ? "名称未設定" : trigger.TriggerName);
+            this.DrawTriggerDetailRow("種別", GetTriggerKindLabel(trigger));
+            this.DrawTriggerDetailRow("所属ボックス", string.IsNullOrWhiteSpace(trigger.TriggerBoxId) ? "未分類" : this.GetTriggerBoxDisplayName(trigger.TriggerBoxId, "不明なBOX"));
+            this.DrawTriggerDetailRow("所属ラベル", string.IsNullOrWhiteSpace(trigger.TriggerLabelId) ? "未設定" : this.GetTriggerLabelDisplayName(trigger.TriggerLabelId, "不明なラベル"));
+            this.DrawTriggerDetailRow("判定", trigger.ExactMatch ? "完全一致" : "部分一致");
+            this.DrawTriggerDetailRow("トリガー文字", ToDisplayValue(trigger.Keyword));
+            this.DrawTriggerDetailRow("FFXIV Log参照", trigger.UseFfxivLogReference ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("前提", trigger.UsePrerequisite ? ToDisplayValue(trigger.PrerequisiteTriggerId, "ON：未指定") : "OFF");
+            this.DrawTriggerDetailRow("バトルログ", ToDisplayValue(trigger.BattleLogKeyword));
+            this.DrawTriggerDetailRow("内部ログ", ToDisplayValue(trigger.GetInternalLogKeywordText()));
+            this.DrawTriggerDetailRow("ステータス残り時間", trigger.EnableStatusRemainingAppend ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("残り時間参照ジョブ", ToDisplayValue(trigger.StatusRemainingJob));
+            this.DrawTriggerDetailRow("残り時間参照ステータス", ToDisplayValue(trigger.StatusRemainingStatusName));
+            this.DrawTriggerDetailRow("表示種別", trigger.DisplayTextMode ? "テキスト" : "画像");
+            this.DrawTriggerDetailRow("表示テキスト", ToDisplayValue(trigger.DisplayText));
+            this.DrawTriggerDetailRow("VOICEVOX読み上げ", trigger.EnableVoiceVox ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("VOICEVOX URL", ToDisplayValue(trigger.VoiceVoxEndpoint));
+            this.DrawTriggerDetailRow("VOICEVOX Speaker ID", trigger.VoiceVoxSpeakerId.ToString(CultureInfo.InvariantCulture));
+            this.DrawTriggerDetailRow("画像種別", trigger.IsWebImage ? "Web画像" : "ローカル画像");
+            this.DrawTriggerDetailRow("画像パス", ToDisplayValue(trigger.ImagePath));
+            this.DrawTriggerDetailRow("画面位置", $"X={trigger.PositionX:0.##} / Y={trigger.PositionY:0.##}");
+            this.DrawTriggerDetailRow("待機時間", $"{trigger.WaitSeconds:0.##} 秒");
+            this.DrawTriggerDetailRow("表示時間", $"{trigger.DisplaySeconds:0.##} 秒");
+            this.DrawTriggerDetailRow("元画像サイズ使用", trigger.UseOriginalImageSize ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("画像幅", $"{trigger.ImageWidth:0.##}");
+            this.DrawTriggerDetailRow("画像高さ", $"{trigger.ImageHeight:0.##}");
+            this.DrawTriggerDetailRow("画像サイズ旧設定", $"{trigger.ImageSize:0.##}");
+            this.DrawTriggerDetailRow("倍率", $"{(trigger.ScalePercent <= 0.0f ? 100.0f : trigger.ScalePercent):0.##}%");
+            this.DrawTriggerDetailRow("テキストサイズ", $"{trigger.TextSize:0.##}");
+            this.DrawTriggerDetailRow("フォント", GetTextFontDesignLabel(trigger.TextFontDesign));
+            this.DrawTriggerDetailRow("文字スナップ", trigger.EnableTextPixelSnap ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("影位置", $"X={trigger.TextShadowOffsetX:0.##} / Y={trigger.TextShadowOffsetY:0.##}");
+            this.DrawTriggerDetailRow("影・発光色", $"R={trigger.TextShadowColorR:0.##} G={trigger.TextShadowColorG:0.##} B={trigger.TextShadowColorB:0.##} A={trigger.TextShadowColorA:0.##}");
+            this.DrawTriggerDetailRow("テキスト色", $"R={trigger.TextColorR:0.##} G={trigger.TextColorG:0.##} B={trigger.TextColorB:0.##} A={trigger.TextColorA:0.##}");
+            this.DrawTriggerDetailRow("枠線", trigger.EnableTextOutline ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("枠線太さ", $"{trigger.TextOutlineThickness:0.##}");
+            this.DrawTriggerDetailRow("枠線色", $"R={trigger.TextOutlineColorR:0.##} G={trigger.TextOutlineColorG:0.##} B={trigger.TextOutlineColorB:0.##} A={trigger.TextOutlineColorA:0.##}");
+            this.DrawTriggerDetailRow("フェードイン", trigger.EnableTextFadeIn ? "ON" : "OFF");
+            this.DrawTriggerDetailRow("フェードイン時間", $"{trigger.TextFadeInSeconds:0.##} 秒");
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Unindent(24.0f);
+    }
+
+    private void DrawTriggerDetailRow(string label, string value)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.TextUnformatted(label);
+        ImGui.TableSetColumnIndex(1);
+        ImGui.TextWrapped(value);
+    }
+
+    private bool TryFindTriggerLocation(HappyTriggerSetting trigger, out TriggerListKind listKind, out int index)
+    {
+        for (var i = 0; i < this.configuration.Triggers.Count; i++)
+        {
+            if (ReferenceEquals(this.configuration.Triggers[i], trigger) || IsSameTrigger(this.configuration.Triggers[i], trigger))
+            {
+                listKind = TriggerListKind.Image;
+                index = i;
+                return true;
+            }
+        }
+
+        for (var i = 0; i < this.configuration.TextTriggers.Count; i++)
+        {
+            if (ReferenceEquals(this.configuration.TextTriggers[i], trigger) || IsSameTrigger(this.configuration.TextTriggers[i], trigger))
+            {
+                listKind = TriggerListKind.Text;
+                index = i;
+                return true;
+            }
+        }
+
+        for (var i = 0; i < this.configuration.FfxivLogTriggers.Count; i++)
+        {
+            if (ReferenceEquals(this.configuration.FfxivLogTriggers[i], trigger) || IsSameTrigger(this.configuration.FfxivLogTriggers[i], trigger))
+            {
+                listKind = TriggerListKind.FfxivLog;
+                index = i;
+                return true;
+            }
+        }
+
+        listKind = TriggerListKind.Image;
+        index = -1;
+        return false;
+    }
+
+    private static bool IsSameTrigger(HappyTriggerSetting left, HappyTriggerSetting right)
+    {
+        return !string.IsNullOrWhiteSpace(left.TriggerId)
+            && !string.IsNullOrWhiteSpace(right.TriggerId)
+            && string.Equals(left.TriggerId, right.TriggerId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetManagementTriggerKey(HappyTriggerSetting trigger, TriggerListKind listKind, int index)
+    {
+        var triggerId = string.IsNullOrWhiteSpace(trigger.TriggerId) ? $"index{index}" : trigger.TriggerId.Trim();
+        return $"{GetTriggerListKindKey(listKind)}_{triggerId}";
+    }
+
+    private static string GetTriggerKindLabel(HappyTriggerSetting trigger)
+    {
+        if (trigger.UseFfxivLogReference)
+        {
+            return "FFXIV Log参照用";
+        }
+
+        return trigger.DisplayTextMode ? "テキスト表示用" : "画像表示用";
+    }
+
+    private static string ToDisplayValue(string? value, string emptyText = "未設定")
+    {
+        return string.IsNullOrWhiteSpace(value) ? emptyText : value.Trim();
+    }
+
+    private static string GetTriggerDisplayName(HappyTriggerSetting trigger)
+    {
+        var triggerId = string.IsNullOrWhiteSpace(trigger.TriggerId)
+            ? "未採番"
+            : trigger.TriggerId.Trim();
+        var triggerName = string.IsNullOrWhiteSpace(trigger.TriggerName)
+            ? "名称未設定"
+            : trigger.TriggerName.Trim();
+
+        return $"{triggerId} : {triggerName}";
+    }
+
+    private List<HappyTriggerSetting> GetAllTriggers()
+    {
+        return this.configuration.Triggers
+            .Concat(this.configuration.TextTriggers)
+            .Concat(this.configuration.FfxivLogTriggers)
+            .ToList();
+    }
+
+    private void RemoveTriggerBox(string boxId)
+    {
+        this.configuration.TriggerBoxes.RemoveAll(box => string.Equals(box.BoxId, boxId, StringComparison.OrdinalIgnoreCase));
+        var removedLabelIds = this.configuration.TriggerLabels
+            .Where(label => string.Equals(label.BoxId, boxId, StringComparison.OrdinalIgnoreCase))
+            .Select(label => label.LabelId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        this.configuration.TriggerLabels.RemoveAll(label => string.Equals(label.BoxId, boxId, StringComparison.OrdinalIgnoreCase));
+
+        foreach (var trigger in this.GetAllTriggers())
+        {
+            if (string.Equals(trigger.TriggerBoxId, boxId, StringComparison.OrdinalIgnoreCase))
+            {
+                trigger.TriggerBoxId = string.Empty;
+            }
+
+            if (removedLabelIds.Contains(trigger.TriggerLabelId))
+            {
+                trigger.TriggerLabelId = string.Empty;
+            }
+        }
+
+        this.saveConfig();
+    }
+
+    private void RemoveTriggerLabel(string labelId)
+    {
+        this.configuration.TriggerLabels.RemoveAll(label => string.Equals(label.LabelId, labelId, StringComparison.OrdinalIgnoreCase));
+        foreach (var trigger in this.GetAllTriggers())
+        {
+            if (string.Equals(trigger.TriggerLabelId, labelId, StringComparison.OrdinalIgnoreCase))
+            {
+                trigger.TriggerLabelId = string.Empty;
+            }
+        }
+
+        this.saveConfig();
+    }
+
+    private string GetTriggerBoxDisplayName(string? boxId, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(boxId))
+        {
+            return fallback;
+        }
+
+        var box = this.configuration.TriggerBoxes.FirstOrDefault(box => string.Equals(box.BoxId, boxId, StringComparison.OrdinalIgnoreCase));
+        if (box == null)
+        {
+            return $"{boxId} : 不明";
+        }
+
+        var boxName = string.IsNullOrWhiteSpace(box.Name) ? fallback : box.Name.Trim();
+        return $"{box.BoxId} : {boxName}";
+    }
+
+    private string GetTriggerLabelDisplayName(string? labelId, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(labelId))
+        {
+            return fallback;
+        }
+
+        var label = this.configuration.TriggerLabels.FirstOrDefault(label => string.Equals(label.LabelId, labelId, StringComparison.OrdinalIgnoreCase));
+        if (label == null)
+        {
+            return $"{labelId} : 不明";
+        }
+
+        var labelName = string.IsNullOrWhiteSpace(label.Name) ? fallback : label.Name.Trim();
+        return $"{label.LabelId} : {labelName}";
+    }
+
+    private string GenerateNextManagementId(string prefix)
+    {
+        var maxNumber = 0;
+
+        foreach (var box in this.configuration.TriggerBoxes)
+        {
+            if (HappyTriggerSetting.TryGetManagementIdNumber(box.BoxId, prefix, out var number))
+            {
+                maxNumber = Math.Max(maxNumber, number);
+            }
+        }
+
+        foreach (var label in this.configuration.TriggerLabels)
+        {
+            if (HappyTriggerSetting.TryGetManagementIdNumber(label.LabelId, prefix, out var number))
+            {
+                maxNumber = Math.Max(maxNumber, number);
+            }
+        }
+
+        return HappyTriggerSetting.FormatManagementId(prefix, maxNumber + 1);
     }
 
     private void DrawFfxivLogTab()
@@ -1123,7 +2971,7 @@ public sealed class HappyTriggerWindow : Window
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(320.0f);
-        if (ImGui.InputText($"##{childId}_search", ref searchText, 512))
+        if (InputTextJapanese($"##{childId}_search", ref searchText, 512))
         {
             searchText = RemoveLineBreaks(searchText);
         }
@@ -1268,6 +3116,8 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.PrerequisiteTriggerId = string.Empty;
         }
 
+        this.editTrigger.TriggerName = RemoveLineBreaks(this.editTrigger.TriggerName ?? string.Empty).Trim();
+        this.NormalizeEditingManagementAssignment();
         this.EnsureEditingTriggerId(saveTargetKind);
 
         if (this.editingIndex >= 0)
@@ -1355,6 +3205,31 @@ public sealed class HappyTriggerWindow : Window
         else
         {
             this.configuration.Triggers.Add(this.editTrigger.Clone());
+        }
+    }
+
+    private void NormalizeEditingManagementAssignment()
+    {
+        if (!string.IsNullOrWhiteSpace(this.editTrigger.TriggerLabelId))
+        {
+            var label = this.configuration.TriggerLabels.FirstOrDefault(label =>
+                string.Equals(label.LabelId, this.editTrigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+
+            if (label == null)
+            {
+                this.editTrigger.TriggerLabelId = string.Empty;
+            }
+            else
+            {
+                this.editTrigger.TriggerBoxId = label.BoxId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(this.editTrigger.TriggerBoxId)
+            && !this.configuration.TriggerBoxes.Any(box => string.Equals(box.BoxId, this.editTrigger.TriggerBoxId, StringComparison.OrdinalIgnoreCase)))
+        {
+            this.editTrigger.TriggerBoxId = string.Empty;
+            this.editTrigger.TriggerLabelId = string.Empty;
         }
     }
 
