@@ -19,6 +19,10 @@ public sealed class Configuration : IPluginConfiguration
     // FFXIV Logタブに出力されたバトルログ / 内部ログを参照するトリガーです。
     public List<HappyTriggerSetting> FfxivLogTriggers { get; set; } = new();
 
+    // FFXIV Log参照トリガーで、バトルログ / 内部ログの組み合わせ条件が揃う猶予秒数です。
+    // 例: 15.0 の場合、最初にマッチした条件から最後にマッチした条件までが15秒以内なら発火します。
+    public float FfxivLogReferencePairWindowSeconds { get; set; } = 10.0f;
+
     // FFXIV Log参照トリガーのマッチ状態デバッグログを内部ログに表示するかどうかです。
     // OFFの場合も判定自体は行いますが、デバッグログは出力しません。
     public bool ShowFfxivLogReferenceDebugLogs { get; set; } = false;

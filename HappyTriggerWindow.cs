@@ -3160,6 +3160,17 @@ public sealed class HappyTriggerWindow : Window
             ImGui.SetTooltip("ONにすると、FFXIV Log参照トリガーの Matched / Missing 状態を内部ログに出力します。デバッグログはONでもトリガー判定対象から除外されます。");
         }
 
+        var pairWindowSeconds = this.configuration.FfxivLogReferencePairWindowSeconds;
+        ImGui.SetNextItemWidth(160.0f);
+        if (ImGui.InputFloat("組み合わせ判定猶予秒数", ref pairWindowSeconds, 1.0f, 5.0f))
+        {
+            this.configuration.FfxivLogReferencePairWindowSeconds = Math.Clamp(pairWindowSeconds, 1.0f, 120.0f);
+            this.saveConfig();
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("1.0〜120.0秒。バトルログ/内部ログの全条件がこの秒数内に揃った場合だけ発火します。");
+
         ImGui.TextDisabled("上段はFFXIVのチャットログ由来のログ、下段はHappyTrigger内部処理ログです。");
         ImGui.Spacing();
 
@@ -3207,63 +3218,58 @@ public sealed class HappyTriggerWindow : Window
         var filteredLogIndexes = GetFilteredLogIndexes(logs, searchText);
         var hasSearchText = !string.IsNullOrWhiteSpace(searchText);
 
-        if (selectedIndex >= 0 && selectedIndex < logs.Count)
-        {
-            ImGui.SameLine();
+        var logText = BuildLogText(logs, filteredLogIndexes);
 
-            if (ImGui.SmallButton($"選択ログをコピー##{childId}_copy"))
-            {
-                ImGui.SetClipboardText(logs[selectedIndex].DisplayText);
-            }
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"表示中ログを全コピー##{childId}_copy_all"))
+        {
+            ImGui.SetClipboardText(logText);
         }
 
         ImGui.TextDisabled(hasSearchText
-            ? $"検索結果: {filteredLogIndexes.Count} / {logs.Count} 件。行をクリックで選択、ダブルクリックでコピーできます。"
-            : "行をクリックで選択、ダブルクリックでコピーできます。");
+            ? $"検索結果: {filteredLogIndexes.Count} / {logs.Count} 件。テキストエリア内をドラッグして、任意の複数行をコピーできます。"
+            : "テキストエリア内をドラッグして、任意の複数行をコピーできます。");
 
         var logBoxHeight = Math.Min(height, CalculateLogBoxHeight(MaxVisibleLogRows));
-
-        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.28f, 0.30f, 0.28f, 0.96f));
-        ImGui.BeginChild(childId, new Vector2(-1.0f, logBoxHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
 
         if (logs.Count == 0)
         {
             selectedIndex = -1;
-            ImGui.TextDisabled("ログはまだありません。");
+            var emptyText = "ログはまだありません。";
+            ImGui.InputTextMultiline(
+                $"##{childId}_text_area",
+                ref emptyText,
+                Math.Max(emptyText.Length + 1, 256),
+                new Vector2(-1.0f, logBoxHeight),
+                ImGuiInputTextFlags.ReadOnly);
         }
         else if (filteredLogIndexes.Count == 0)
         {
-            ImGui.TextDisabled("検索条件に一致するログはありません。");
+            selectedIndex = -1;
+            var emptyText = "検索条件に一致するログはありません。";
+            ImGui.InputTextMultiline(
+                $"##{childId}_text_area",
+                ref emptyText,
+                Math.Max(emptyText.Length + 1, 256),
+                new Vector2(-1.0f, logBoxHeight),
+                ImGuiInputTextFlags.ReadOnly);
         }
         else
         {
-            foreach (var logIndex in filteredLogIndexes)
+            selectedIndex = -1;
+            var textAreaBufferSize = Math.Max(logText.Length * 4 + 1, 4096);
+            ImGui.InputTextMultiline(
+                $"##{childId}_text_area",
+                ref logText,
+                textAreaBufferSize,
+                new Vector2(-1.0f, logBoxHeight),
+                ImGuiInputTextFlags.ReadOnly);
+
+            if (!hasSearchText && autoScroll && ImGui.IsItemHovered())
             {
-                var log = logs[logIndex];
-                var selected = selectedIndex == logIndex;
-
-                ImGui.PushID($"{childId}_{logIndex}");
-                if (ImGui.Selectable(log.DisplayText, selected))
-                {
-                    selectedIndex = logIndex;
-
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                    {
-                        ImGui.SetClipboardText(log.DisplayText);
-                    }
-                }
-
-                ImGui.PopID();
-            }
-
-            if (!hasSearchText && autoScroll && ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 24.0f)
-            {
-                ImGui.SetScrollHereY(1.0f);
+                ImGui.SetTooltip("ログの末尾へ移動する場合は、テキストエリア内をクリックして Ctrl+End を押してください。");
             }
         }
-
-        ImGui.EndChild();
-        ImGui.PopStyleColor();
     }
 
 
@@ -3272,6 +3278,16 @@ public sealed class HappyTriggerWindow : Window
         var rowHeight = ImGui.GetTextLineHeightWithSpacing();
         var paddingY = ImGui.GetStyle().WindowPadding.Y * 2.0f;
         return Math.Max(120.0f, (rowHeight * maxRows) + paddingY);
+    }
+
+    private static string BuildLogText(IReadOnlyList<FfxivLogEntry> logs, IReadOnlyList<int> filteredLogIndexes)
+    {
+        if (logs.Count == 0 || filteredLogIndexes.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join("\n", filteredLogIndexes.Select(index => logs[index].DisplayText));
     }
 
     private static List<int> GetFilteredLogIndexes(IReadOnlyList<FfxivLogEntry> logs, string searchText)

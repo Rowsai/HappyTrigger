@@ -26,8 +26,7 @@ namespace HappyTrigger;
 public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/happytrigger";
-    private const int MaxLogEntries = 500;
-    private const double FfxivLogReferencePairWindowSeconds = 10.0;
+    private const int MaxLogEntries = 5000;
 
     [PluginService]
     internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
@@ -76,6 +75,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly Dictionary<string, FfxivLogReferenceMatchState> ffxivLogReferenceMatchStates = new(StringComparer.OrdinalIgnoreCase);
     private bool wasFullWipeDetected = false;
+
+    private double FfxivLogReferencePairWindowSeconds =>
+        Math.Clamp(this.configuration.FfxivLogReferencePairWindowSeconds, 1.0f, 120.0f);
 
     public Plugin()
     {
