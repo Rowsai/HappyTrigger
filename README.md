@@ -35,7 +35,7 @@ HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表
 
 トリガーは以下の3階層で管理します。
 
-![trigger hierarchy](docs/images/trigger_hierarchy.svg)
+![trigger hierarchy](docs/images/trigger_hierarchy.png)
 
 ```text
 トリガーボックス（BOX***）
@@ -160,8 +160,6 @@ X=ラベルAのX / Y=ラベルAのY+1行分    ログトリガーD
 
 トリガーラベル座標ONのログトリガーで、残り時間表示がある場合は、**残り時間が短いものほど上に優先表示**します。
 
-![remaining sort](docs/images/label_stack_sort.svg)
-
 表示優先度は以下です。
 
 ```text
@@ -236,59 +234,3 @@ Splatoon系のレイアウトで使用される VFX パスを、HappyTrigger の
 
 設定画面を開閉します。
 
----
-
-## Build
-
-```bash
-dotnet restore
-dotnet build -c Release
-```
-
-### DalamudPackager でZIP生成に失敗する場合
-
-以下のようなエラーが出る場合があります。
-
-```text
-The process cannot access the file ...\bin\Release\HappyTrigger because it is being used by another process.
-```
-
-これはコードエラーではなく、`bin\Release\HappyTrigger` フォルダを別プロセスが掴んでいる状態です。  
-FFXIV、Dalamud、Visual Studio、Explorer、7-Zipなどを閉じてから再ビルドしてください。
-
-PowerShell例：
-
-```powershell
-cd C:\Users\t-k3-\source\repos\dev\HappyTrigger
-
-dotnet build-server shutdown
-Remove-Item -Recurse -Force .\bin -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .\obj -ErrorAction SilentlyContinue
-
-dotnet restore
-dotnet build -c Release
-```
-
----
-
-## Manifest / Repo
-
-`repo.json` では以下を設定します。
-
-```json
-{
-  "Author": "Rowsai",
-  "Name": "HappyTrigger",
-  "InternalName": "HappyTrigger",
-  "Description": "Display images or text when chat log keywords appear.",
-  "ApplicableVersion": "any",
-  "DalamudApiLevel": 15
-}
-```
-
----
-
-## 注意
-
-このプラグインは Dalamud API 15 向けです。  
-Dalamud APIやFFXIV本体アップデートにより、VFXフックや一部サービスAPIの修正が必要になる場合があります。
