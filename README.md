@@ -1,7 +1,7 @@
 # HappyTrigger
 
 <p align="center">
-  <img src="[docs/images/icon.png](https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/image/icon.png)" width="160" alt="HappyTrigger icon">
+  <img src="https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/image/icon.png" width="160" alt="HappyTrigger icon">
 </p>
 
 HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表示プラグイン**です。  
@@ -35,7 +35,7 @@ HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表
 
 トリガーは以下の3階層で管理します。
 
-![trigger hierarchy](docs/images/trigger_hierarchy.png)
+![trigger hierarchy](https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/docs/image/trigger_hierarchy.png)
 
 ```text
 トリガーボックス（BOX***）
