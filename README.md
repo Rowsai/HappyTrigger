@@ -1,7 +1,7 @@
 # HappyTrigger
 
 <p align="center">
-  <img src="docs/images/icon.png" width="160" alt="HappyTrigger icon">
+  <img src="[docs/images/icon.png](https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/image/icon.png)" width="160" alt="HappyTrigger icon">
 </p>
 
 HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表示プラグイン**です。  
