@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.0.0.6</Version>
+    <Version>0.0.0.8</Version>
     <IsPackable>false</IsPackable>
     <Authors>Rowsai</Authors>
     <AssemblyName>HappyTrigger</AssemblyName>
@@ -12,4 +12,8 @@
     <Content Include="HappyTrigger.json" />
     <Content Include="icon.png" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+
 </Project>

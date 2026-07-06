@@ -55,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("HappyTrigger");
     private readonly Configuration configuration;
     private readonly ImageCacheService imageCacheService;
+    private readonly TextTextureCacheService textTextureCacheService;
     private readonly VoiceVoxSpeechService voiceVoxSpeechService;
     private readonly VfxLogCollector vfxLogCollector;
     private readonly HappyTriggerWindow configWindow;
@@ -106,13 +107,17 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         this.imageCacheService = new ImageCacheService(TextureProvider);
+        this.textTextureCacheService = new TextTextureCacheService(TextureProvider);
         this.voiceVoxSpeechService = new VoiceVoxSpeechService(message => this.AddInternalLog(message, false));
         this.vfxLogCollector = new VfxLogCollector(ObjectTable, GameInteropProvider, Log, this.AddVfxInternalLog);
         this.configWindow = new HappyTriggerWindow(
             this.configuration,
             this.SaveConfig,
             trigger => this.ActivatePopup(trigger, true),
+            this.ActivatePopups,
             this.ActivatePositionSettingTrigger,
+            this.ActivatePositionSettingTriggers,
+            this.ActivatePositionSettingForLabel,
             this.ClosePositionSettingPopup,
             this.GetBattleLogsSnapshot,
             this.GetInternalLogsSnapshot,
@@ -173,7 +178,7 @@ public sealed class Plugin : IDalamudPlugin
             changed = true;
         }
 
-        usedIds.Add(trigger.TriggerId);
+        usedIds.Add(trigger.TriggerId ?? string.Empty);
         return changed;
     }
 
@@ -193,7 +198,7 @@ public sealed class Plugin : IDalamudPlugin
             changed = true;
         }
 
-        usedIds.Add(trigger.TriggerId);
+        usedIds.Add(trigger.TriggerId ?? string.Empty);
         return changed;
     }
 
@@ -440,7 +445,35 @@ public sealed class Plugin : IDalamudPlugin
 
         this.AddFfxivLogReferenceMatchDebug(trigger, state, "Matched");
         this.FireFfxivLogReferenceTrigger(trigger, FfxivLogReferenceSource.All, state.MatchedLogStatusRemainingSnapshot);
-        this.ResetFfxivLogReferenceMatchState(trigger);
+
+        if (trigger.AllowDuplicateStatusRemainingDisplay && trigger.HasStatusRemainingAppendSetting())
+        {
+            // job=ALL などで、同じステータスが別メンバーに続けて付与されるケースがあります。
+            // 全条件マッチ後に状態を完全リセットすると、直前のバトルログ/詠唱ログ条件まで消えてしまい、
+            // 2人目以降の MemberStatus ログだけでは発火できません。
+            // 同時表示ONの場合は、共通条件は猶予秒数の範囲で残し、ステータス付与ログ条件だけを次の入力待ちに戻します。
+            this.RemoveStatusRemainingInternalLogMatches(trigger, state);
+        }
+        else
+        {
+            this.ResetFfxivLogReferenceMatchState(trigger);
+        }
+    }
+
+    private void RemoveStatusRemainingInternalLogMatches(HappyTriggerSetting trigger, FfxivLogReferenceMatchState state)
+    {
+        var keywords = trigger.GetInternalLogKeywords();
+        for (var i = 0; i < keywords.Count; i++)
+        {
+            var keyword = keywords[i] ?? string.Empty;
+            if (keyword.Contains("MemberStatus Information.", StringComparison.OrdinalIgnoreCase) ||
+                keyword.Contains("StatusName=", StringComparison.OrdinalIgnoreCase))
+            {
+                state.InternalLogMatchedAtUtcByIndex.Remove(i);
+            }
+        }
+
+        state.MatchedLogStatusRemainingSnapshot = null;
     }
 
     private bool TryRecordInternalLogMatch(
@@ -655,7 +688,7 @@ public sealed class Plugin : IDalamudPlugin
         this.ReserveStatusRemainingMatchLock(trigger, statusRemainingSnapshot);
 
         this.AddInternalLog(
-            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName}" : "OFF")}",
+            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName} AllowDuplicate={(trigger.AllowDuplicateStatusRemainingDisplay ? "ON" : "OFF")}" : "OFF")}",
             false);
         this.ActivatePopup(trigger, false, statusRemainingSnapshot);
     }
@@ -664,7 +697,7 @@ public sealed class Plugin : IDalamudPlugin
         HappyTriggerSetting trigger,
         StatusRemainingSnapshot? statusRemainingSnapshot)
     {
-        if (!trigger.HasStatusRemainingAppendSetting())
+        if (!trigger.HasStatusRemainingAppendSetting() || trigger.AllowDuplicateStatusRemainingDisplay)
         {
             return false;
         }
@@ -696,7 +729,7 @@ public sealed class Plugin : IDalamudPlugin
         HappyTriggerSetting trigger,
         StatusRemainingSnapshot? statusRemainingSnapshot)
     {
-        if (!trigger.HasStatusRemainingAppendSetting())
+        if (!trigger.HasStatusRemainingAppendSetting() || trigger.AllowDuplicateStatusRemainingDisplay)
         {
             return;
         }
@@ -799,7 +832,8 @@ public sealed class Plugin : IDalamudPlugin
                     statusRemainingSnapshot.StatusName,
                     statusRemainingSnapshot.RemainingSeconds,
                     statusRemainingSnapshot.CapturedAtUtc);
-            this.activePopups.Add(new PopupImageState(trigger, false, statusRemainingDisplayState));
+            var labelStack = this.GetTriggerLabelForStack(trigger);
+            this.activePopups.Add(new PopupImageState(trigger, false, statusRemainingDisplayState, string.Empty, labelStack));
             if (writeInternalLog)
             {
                 this.AddInternalLog($"Text display queued. Text='{trigger.DisplayText}', Wait={Math.Clamp(trigger.WaitSeconds, 0.0f, 600.0f):0.##}s, X={trigger.PositionX:0}, Y={trigger.PositionY:0}");
@@ -824,25 +858,109 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void ActivatePopups(IReadOnlyList<HappyTriggerSetting> triggers)
+    {
+        foreach (var trigger in triggers.OrderBy(trigger => GetTriggerSortNumber(trigger.TriggerId)).ThenBy(trigger => trigger.TriggerId, StringComparer.OrdinalIgnoreCase))
+        {
+            this.ActivatePopup(trigger, true);
+        }
+    }
+
     private void ActivatePositionSettingTrigger(HappyTriggerSetting trigger)
     {
-        if (trigger.DisplayTextMode)
-        {
-            if (string.IsNullOrWhiteSpace(trigger.DisplayText))
-            {
-                return;
-            }
-        }
-        else if (string.IsNullOrWhiteSpace(trigger.ImagePath))
+        this.ActivatePositionSettingTriggers(new[] { trigger });
+    }
+
+    private void ActivatePositionSettingTriggers(IReadOnlyList<HappyTriggerSetting> triggers)
+    {
+        this.activePopups.RemoveAll(x => x.IsPositionSetting || x.IsExpired);
+
+        var validTriggers = triggers
+            .Where(CanDisplayPositionSettingPopup)
+            .ToList();
+
+        if (validTriggers.Count == 0)
         {
             return;
         }
 
+        var groupId = validTriggers.Count >= 2
+            ? $"group:{Guid.NewGuid():N}"
+            : string.Empty;
+
+        foreach (var trigger in validTriggers)
+        {
+            this.activePopups.Add(new PopupImageState(trigger, true, null, groupId));
+        }
+
+        if (validTriggers.Count >= 2)
+        {
+            this.AddInternalLog($"Group position setting popups displayed. Count={validTriggers.Count}. Drag one popup to move all popups in the group.");
+        }
+        else
+        {
+            var trigger = validTriggers[0];
+            this.AddInternalLog(trigger.DisplayTextMode
+                ? $"Text position setting popup displayed. Text='{trigger.DisplayText}'"
+                : $"Image position setting popup displayed. Image='{trigger.ImagePath}'");
+        }
+    }
+
+    private void ActivatePositionSettingForLabel(TriggerLabelSetting label, IReadOnlyList<HappyTriggerSetting> triggers)
+    {
         this.activePopups.RemoveAll(x => x.IsPositionSetting || x.IsExpired);
-        this.activePopups.Add(new PopupImageState(trigger, true));
-        this.AddInternalLog(trigger.DisplayTextMode
-            ? $"Text position setting popup displayed. Text='{trigger.DisplayText}'"
-            : $"Image position setting popup displayed. Image='{trigger.ImagePath}'");
+
+        var validTriggers = triggers
+            .Where(CanDisplayPositionSettingPopup)
+            .OrderBy(trigger => GetTriggerSortNumber(trigger.TriggerId))
+            .ThenBy(trigger => trigger.TriggerId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (validTriggers.Count == 0)
+        {
+            return;
+        }
+
+        var labelPositionTriggers = validTriggers
+            .Where(trigger => trigger.UseTriggerLabelPosition)
+            .ToList();
+        var individualPositionTriggers = validTriggers
+            .Where(trigger => !trigger.UseTriggerLabelPosition)
+            .ToList();
+
+        var groupId = $"label:{label.LabelId}";
+        foreach (var trigger in labelPositionTriggers)
+        {
+            this.activePopups.Add(new PopupImageState(trigger, true, null, groupId, label));
+        }
+
+        foreach (var trigger in individualPositionTriggers)
+        {
+            this.activePopups.Add(new PopupImageState(trigger, true));
+        }
+
+        this.AddInternalLog($"Label position setting popups displayed. LabelId={label.LabelId}, LabelStack={labelPositionTriggers.Count}, Individual={individualPositionTriggers.Count}. Drag label-stack rows to move the label base position. Drag individual rows to move only that trigger.");
+    }
+
+    private TriggerLabelSetting? GetTriggerLabelForStack(HappyTriggerSetting trigger)
+    {
+        if (!trigger.DisplayTextMode || !trigger.UseTriggerLabelPosition || string.IsNullOrWhiteSpace(trigger.TriggerLabelId))
+        {
+            return null;
+        }
+
+        return this.configuration.TriggerLabels.FirstOrDefault(label =>
+            string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool CanDisplayPositionSettingPopup(HappyTriggerSetting trigger)
+    {
+        if (trigger.DisplayTextMode)
+        {
+            return !string.IsNullOrWhiteSpace(trigger.DisplayText);
+        }
+
+        return !string.IsNullOrWhiteSpace(trigger.ImagePath);
     }
 
     private void ClosePositionSettingPopup()
@@ -1127,7 +1245,9 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var allowedJobs = ParseStatusRemainingJobFilter(jobFilter);
-        return allowedJobs.Any(job => string.Equals(job, normalizedLogJob, StringComparison.OrdinalIgnoreCase));
+        return allowedJobs.Any(job =>
+            string.Equals(job, "ALL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(job, normalizedLogJob, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyList<string> ParseStatusRemainingJobFilter(string jobFilter)
@@ -1430,10 +1550,136 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.PopStyleVar();
     }
 
+    private float GetDuplicateStatusRemainingPopupOffset(int currentIndex, PopupImageState popup)
+    {
+        if (!popup.HasStatusRemainingDisplay || !popup.Trigger.AllowDuplicateStatusRemainingDisplay)
+        {
+            return 0.0f;
+        }
+
+        var statusName = popup.StatusRemainingStatusName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(statusName))
+        {
+            return 0.0f;
+        }
+
+        var duplicateIndex = 0;
+        var maxIndex = Math.Min(currentIndex, this.activePopups.Count);
+
+        for (var i = 0; i < maxIndex; i++)
+        {
+            var other = this.activePopups[i];
+            if (ReferenceEquals(other, popup))
+            {
+                break;
+            }
+
+            if (other.IsPositionSetting || other.IsClosed || other.IsExpired || !other.IsReadyToDisplay)
+            {
+                continue;
+            }
+
+            if (!other.HasStatusRemainingDisplay || !other.Trigger.AllowDuplicateStatusRemainingDisplay)
+            {
+                continue;
+            }
+
+            if (string.Equals(other.StatusRemainingStatusName, statusName.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                duplicateIndex++;
+            }
+        }
+
+        if (duplicateIndex <= 0)
+        {
+            return 0.0f;
+        }
+
+        var textSize = Math.Clamp(popup.Trigger.TextSize, 8.0f, 256.0f);
+        var outlineExtra = popup.Trigger.EnableTextOutline
+            ? Math.Max(0.0f, popup.Trigger.TextOutlineThickness) * 2.0f
+            : 0.0f;
+        var lineHeight = Math.Max(28.0f, textSize + outlineExtra + 10.0f);
+
+        return duplicateIndex * lineHeight;
+    }
+
+    private Vector2 GetTextPopupPosition(int currentIndex, PopupImageState popup)
+    {
+        if (popup.HasLabelStack)
+        {
+            var label = popup.LabelStack!;
+            return new Vector2(label.PositionX, label.PositionY + this.GetLabelStackPopupOffset(currentIndex, popup));
+        }
+
+        var position = new Vector2(popup.Trigger.PositionX, popup.Trigger.PositionY);
+        position.Y += this.GetDuplicateStatusRemainingPopupOffset(currentIndex, popup);
+        return position;
+    }
+
+    private float GetLabelStackPopupOffset(int currentIndex, PopupImageState popup)
+    {
+        if (!popup.HasLabelStack)
+        {
+            return 0.0f;
+        }
+
+        var label = popup.LabelStack!;
+        var targetId = label.LabelId ?? string.Empty;
+        var readyPopups = this.activePopups
+            .Where(other => !other.IsClosed && !other.IsExpired && other.IsReadyToDisplay)
+            .Where(other => other.HasLabelStack && string.Equals(other.LabelStack!.LabelId, targetId, StringComparison.OrdinalIgnoreCase))
+            // ラベル座標で縦積み表示するログトリガーは、残り時間表示があるものを上に寄せます。
+            // 残り時間表示つき同士は、残り時間が短い順で並べます。
+            // 残り時間表示がないものは従来どおりID順で後ろに並べます。
+            .OrderBy(other => other.HasStatusRemainingDisplay ? 0 : 1)
+            .ThenBy(other => other.HasStatusRemainingDisplay ? other.CurrentStatusRemainingSeconds : float.MaxValue)
+            .ThenBy(other => GetTriggerSortNumber(other.Trigger.TriggerId))
+            .ThenBy(other => other.Trigger.TriggerId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var offset = 0.0f;
+        foreach (var other in readyPopups)
+        {
+            if (ReferenceEquals(other, popup))
+            {
+                return offset;
+            }
+
+            offset += GetTextPopupLineHeight(other.Trigger) + Math.Max(0.0f, label.LineSpacing);
+        }
+
+        return offset;
+    }
+
+    private static float GetTextPopupLineHeight(HappyTriggerSetting trigger)
+    {
+        var textSize = Math.Clamp(trigger.TextSize, 8.0f, 256.0f);
+        var outlineExtra = trigger.EnableTextOutline || trigger.TextFontDesign == TextFontDesign.StrongOutline
+            ? Math.Max(1.0f, trigger.TextOutlineThickness) * 2.0f
+            : 0.0f;
+        var shadowExtra = trigger.TextFontDesign == TextFontDesign.Shadow || trigger.TextFontDesign == TextFontDesign.Neon
+            ? Math.Abs(trigger.TextShadowOffsetY) + 4.0f
+            : 0.0f;
+
+        return Math.Max(28.0f, textSize + outlineExtra + shadowExtra + 10.0f);
+    }
+
+    private static int GetTriggerSortNumber(string? triggerId)
+    {
+        if (string.IsNullOrWhiteSpace(triggerId))
+        {
+            return int.MaxValue;
+        }
+
+        var digits = new string(triggerId.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var number) ? number : int.MaxValue;
+    }
+
     private void DrawTextPopup(int index, PopupImageState popup)
     {
         var trigger = popup.Trigger;
-        var position = new Vector2(trigger.PositionX, trigger.PositionY);
+        var position = this.GetTextPopupPosition(index, popup);
         var windowName = $"HappyTrigger_text_popup_{index}";
 
         ImGui.SetNextWindowPos(position, ImGuiCond.Always);
@@ -1470,15 +1716,50 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.Begin(windowName, flags))
         {
             var displayText = GetPopupDisplayText(popup);
+
+            // ImGui標準フォントを大きく拡大すると、フォントアトラスの小さい字形を引き伸ばすため滲みます。
+            // くっきり表示ONでは、Windows側で表示サイズそのものの文字画像を作り、テクスチャとして描画します。
+            // これにより大きい文字でも拡大ボケせず、縁取りもはっきりします。
+            if (trigger.EnableTextSharpRendering && !string.IsNullOrEmpty(displayText))
+            {
+                var layoutText = GetPopupDisplayTextLayout(popup);
+                var textureResult = this.textTextureCacheService.GetTextTexture(displayText, layoutText, trigger, fadeAlpha);
+                if (textureResult.Texture != null && textureResult.Size.Width > 0.0f && textureResult.Size.Height > 0.0f)
+                {
+                    var imageSize = new Vector2(textureResult.Size.Width, textureResult.Size.Height);
+                    if (trigger.EnableTextPixelSnap)
+                    {
+                        var cursorPos = ImGui.GetCursorScreenPos();
+                        ImGui.SetCursorScreenPos(new Vector2(MathF.Round(cursorPos.X), MathF.Round(cursorPos.Y)));
+                    }
+
+                    ImGui.Image(
+                        textureResult.Texture.Handle,
+                        imageSize,
+                        Vector2.Zero,
+                        Vector2.One,
+                        new Vector4(1.0f, 1.0f, 1.0f, fadeAlpha));
+
+                    if (popup.IsPositionSetting)
+                    {
+                        this.HandlePositionSettingDrag(popup);
+                    }
+
+                    ImGui.End();
+                    ImGui.PopStyleVar();
+                    return;
+                }
+            }
+
             var drawList = ImGui.GetWindowDrawList();
             var font = ImGui.GetFont();
             var baseFontSize = Math.Max(1.0f, ImGui.GetFontSize());
-            var fontSize = Math.Clamp(trigger.TextSize, 8.0f, 256.0f);
+            var fontSize = GetEffectiveTextFontSize(trigger);
             var fontScale = fontSize / baseFontSize;
             var textSize = ImGui.CalcTextSize(displayText) * fontScale;
             var drawPos = ImGui.GetCursorScreenPos();
 
-            if (trigger.EnableTextPixelSnap)
+            if (trigger.EnableTextPixelSnap || trigger.EnableTextSharpRendering)
             {
                 drawPos = new Vector2(MathF.Round(drawPos.X), MathF.Round(drawPos.Y));
             }
@@ -1507,10 +1788,29 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.PopStyleVar();
     }
 
+    private static float GetEffectiveTextFontSize(HappyTriggerSetting trigger)
+    {
+        var fontSize = Math.Clamp(trigger.TextSize, 8.0f, 256.0f);
+
+        if (!trigger.EnableTextSharpRendering)
+        {
+            return fontSize;
+        }
+
+        // 非整数の拡大率は滲みの原因になりやすいため、くっきり表示では整数pxへ丸めます。
+        // 大きいサイズでは偶数pxへ寄せることで、縁取り位置も安定します。
+        fontSize = MathF.Round(fontSize);
+        if (fontSize >= 48.0f)
+        {
+            fontSize = MathF.Round(fontSize / 2.0f) * 2.0f;
+        }
+
+        return Math.Clamp(fontSize, 8.0f, 256.0f);
+    }
+
     private static string GetPopupDisplayText(PopupImageState popup)
     {
-        var trigger = popup.Trigger;
-        var displayText = trigger.DisplayText ?? string.Empty;
+        var displayText = popup.Trigger.DisplayText ?? string.Empty;
 
         if (!popup.HasStatusRemainingDisplay)
         {
@@ -1518,16 +1818,48 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var remaining = popup.CurrentStatusRemainingSeconds;
-        var suffix = $"{popup.StatusRemainingStatusName}（{remaining:0.00}s）";
+        if (popup.Trigger.EnableTextSharpRendering)
+        {
+            // テクスチャ化表示中に0.01秒単位で更新すると、毎フレームに近い頻度で再生成されます。
+            // 表示は2桁小数のまま、0.10秒単位へ丸めて生成頻度と視覚的なブレを抑えます。
+            remaining = MathF.Round(remaining * 10.0f) / 10.0f;
+        }
+
+        return BuildPopupDisplayTextWithRemaining(popup, $"{remaining:0.00}");
+    }
+
+    private static string GetPopupDisplayTextLayout(PopupImageState popup)
+    {
+        var displayText = popup.Trigger.DisplayText ?? string.Empty;
+
+        if (!popup.HasStatusRemainingDisplay)
+        {
+            return displayText;
+        }
+
+        // 秒数表示つきテクスチャは、実際の秒数が減るたびに文字幅が変わると位置が微妙に揺れます。
+        // レイアウト計測用には実表示とは別の「幅取り用テキスト」を使い、テクスチャサイズを固定します。
+        var maxRemaining = Math.Max(popup.StatusRemainingInitialSeconds, popup.CurrentStatusRemainingSeconds);
+        var integerDigits = Math.Max(2, ((int)MathF.Floor(Math.Max(0.0f, maxRemaining))).ToString().Length);
+        var layoutRemaining = new string('8', integerDigits) + ".88";
+        return BuildPopupDisplayTextWithRemaining(popup, layoutRemaining);
+    }
+
+    private static string BuildPopupDisplayTextWithRemaining(PopupImageState popup, string remainingText)
+    {
+        var displayText = popup.Trigger.DisplayText ?? string.Empty;
+        var statusName = popup.StatusRemainingStatusName ?? string.Empty;
+        var suffix = $"{statusName}（{remainingText}s）";
 
         if (string.IsNullOrWhiteSpace(displayText))
         {
             return suffix;
         }
 
-        if (displayText.Contains(popup.StatusRemainingStatusName, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(statusName) &&
+            displayText.Contains(statusName, StringComparison.OrdinalIgnoreCase))
         {
-            return $"{displayText}（{remaining:0.00}s）";
+            return $"{displayText}（{remainingText}s）";
         }
 
         return $"{displayText} {suffix}";
@@ -1552,13 +1884,18 @@ public sealed class Plugin : IDalamudPlugin
         if (trigger.TextFontDesign == TextFontDesign.Shadow || trigger.TextFontDesign == TextFontDesign.Neon)
         {
             var shadowOffset = new Vector2(trigger.TextShadowOffsetX, trigger.TextShadowOffsetY);
+            if (trigger.EnableTextSharpRendering)
+            {
+                shadowOffset = new Vector2(MathF.Round(shadowOffset.X), MathF.Round(shadowOffset.Y));
+            }
+
             drawList.AddText(font, fontSize, drawPos + shadowOffset, shadowColor, displayText);
         }
 
         if (trigger.TextFontDesign == TextFontDesign.Neon)
         {
-            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 4.0f, true);
-            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 7.0f, false);
+            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 4.0f, true, trigger.EnableTextSharpRendering);
+            DrawTextOffsets(drawList, font, fontSize, drawPos, shadowColor, displayText, 7.0f, false, trigger.EnableTextSharpRendering);
         }
 
         var useOutline = trigger.EnableTextOutline || trigger.TextFontDesign == TextFontDesign.StrongOutline;
@@ -1570,7 +1907,7 @@ public sealed class Plugin : IDalamudPlugin
                 outlineThickness = Math.Max(3.0f, outlineThickness * 1.5f);
             }
 
-            DrawTextOffsets(drawList, font, fontSize, drawPos, outlineColor, displayText, outlineThickness, true);
+            DrawTextOffsets(drawList, font, fontSize, drawPos, outlineColor, displayText, outlineThickness, true, trigger.EnableTextSharpRendering);
         }
 
         if (trigger.TextFontDesign == TextFontDesign.Bold)
@@ -1578,6 +1915,12 @@ public sealed class Plugin : IDalamudPlugin
             drawList.AddText(font, fontSize, drawPos + new Vector2(1.0f, 0.0f), textColor, displayText);
             drawList.AddText(font, fontSize, drawPos + new Vector2(0.0f, 1.0f), textColor, displayText);
             drawList.AddText(font, fontSize, drawPos + new Vector2(1.0f, 1.0f), textColor, displayText);
+        }
+
+        // くっきり表示では同じ座標に重ね描きして、拡大時の薄さを少し補正します。
+        if (trigger.EnableTextSharpRendering && fontSize >= 48.0f)
+        {
+            drawList.AddText(font, fontSize, drawPos, textColor, displayText);
         }
 
         drawList.AddText(font, fontSize, drawPos, textColor, displayText);
@@ -1591,31 +1934,62 @@ public sealed class Plugin : IDalamudPlugin
         uint color,
         string text,
         float thickness,
-        bool includeDiagonals)
+        bool includeDiagonals,
+        bool sharpRendering)
     {
-        var offsets = includeDiagonals
-            ? new[]
-            {
-                new Vector2(-thickness, 0.0f),
-                new Vector2(thickness, 0.0f),
-                new Vector2(0.0f, -thickness),
-                new Vector2(0.0f, thickness),
-                new Vector2(-thickness, -thickness),
-                new Vector2(-thickness, thickness),
-                new Vector2(thickness, -thickness),
-                new Vector2(thickness, thickness),
-            }
-            : new[]
-            {
-                new Vector2(-thickness, 0.0f),
-                new Vector2(thickness, 0.0f),
-                new Vector2(0.0f, -thickness),
-                new Vector2(0.0f, thickness),
-            };
-
-        foreach (var offset in offsets)
+        if (!sharpRendering)
         {
-            drawList.AddText(font, fontSize, drawPos + offset, color, text);
+            var offsets = includeDiagonals
+                ? new[]
+                {
+                    new Vector2(-thickness, 0.0f),
+                    new Vector2(thickness, 0.0f),
+                    new Vector2(0.0f, -thickness),
+                    new Vector2(0.0f, thickness),
+                    new Vector2(-thickness, -thickness),
+                    new Vector2(-thickness, thickness),
+                    new Vector2(thickness, -thickness),
+                    new Vector2(thickness, thickness),
+                }
+                : new[]
+                {
+                    new Vector2(-thickness, 0.0f),
+                    new Vector2(thickness, 0.0f),
+                    new Vector2(0.0f, -thickness),
+                    new Vector2(0.0f, thickness),
+                };
+
+            foreach (var offset in offsets)
+            {
+                drawList.AddText(font, fontSize, drawPos + offset, color, text);
+            }
+
+            return;
+        }
+
+        var radius = Math.Clamp((int)MathF.Round(thickness), 1, 24);
+        for (var y = -radius; y <= radius; y++)
+        {
+            for (var x = -radius; x <= radius; x++)
+            {
+                if (x == 0 && y == 0)
+                {
+                    continue;
+                }
+
+                if (!includeDiagonals && x != 0 && y != 0)
+                {
+                    continue;
+                }
+
+                var distance = MathF.Sqrt((x * x) + (y * y));
+                if (distance > radius + 0.01f)
+                {
+                    continue;
+                }
+
+                drawList.AddText(font, fontSize, drawPos + new Vector2(x, y), color, text);
+            }
         }
     }
 
@@ -1684,6 +2058,52 @@ public sealed class Plugin : IDalamudPlugin
         return new Vector2(Math.Max(1.0f, width), Math.Max(1.0f, height));
     }
 
+    private void ApplyPositionSettingDragDelta(PopupImageState popup, Vector2 delta)
+    {
+        if (popup.IsLabelPositionSetting && popup.LabelStack != null)
+        {
+            popup.LabelStack.PositionX += delta.X;
+            popup.LabelStack.PositionY += delta.Y;
+
+            foreach (var labelPopup in this.activePopups)
+            {
+                if (labelPopup.IsPositionSetting && labelPopup.HasLabelStack &&
+                    string.Equals(labelPopup.LabelStack!.LabelId, popup.LabelStack.LabelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    labelPopup.PositionChanged = true;
+                }
+            }
+
+            return;
+        }
+
+        if (popup.IsGroupedPositionSetting)
+        {
+            foreach (var groupedPopup in this.activePopups)
+            {
+                if (!groupedPopup.IsPositionSetting || groupedPopup.IsClosed)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(groupedPopup.PositionSettingGroupId, popup.PositionSettingGroupId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                groupedPopup.Trigger.PositionX += delta.X;
+                groupedPopup.Trigger.PositionY += delta.Y;
+                groupedPopup.PositionChanged = true;
+            }
+
+            return;
+        }
+
+        popup.Trigger.PositionX += delta.X;
+        popup.Trigger.PositionY += delta.Y;
+        popup.PositionChanged = true;
+    }
+
     private void HandlePositionSettingDrag(PopupImageState popup)
     {
         var trigger = popup.Trigger;
@@ -1710,9 +2130,7 @@ public sealed class Plugin : IDalamudPlugin
 
             if (delta.X != 0.0f || delta.Y != 0.0f)
             {
-                trigger.PositionX += delta.X;
-                trigger.PositionY += delta.Y;
-                popup.PositionChanged = true;
+                this.ApplyPositionSettingDragDelta(popup, delta);
             }
 
             return;
@@ -1723,6 +2141,7 @@ public sealed class Plugin : IDalamudPlugin
         if (popup.PositionChanged)
         {
             popup.PositionChanged = false;
+            this.SaveConfig();
         }
     }
 
@@ -1756,6 +2175,7 @@ public sealed class Plugin : IDalamudPlugin
         this.windowSystem.RemoveAllWindows();
         this.vfxLogCollector.Dispose();
         this.voiceVoxSpeechService.Dispose();
+        this.textTextureCacheService.Dispose();
         this.imageCacheService.Dispose();
     }
 }

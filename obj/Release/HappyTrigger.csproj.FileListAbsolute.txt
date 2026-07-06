@@ -1,10 +1,16 @@
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\icon.png
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\HappyTrigger.deps.json
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\HappyTrigger.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\Microsoft.Win32.SystemEvents.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\System.Drawing.Common.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\System.Private.Windows.Core.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\System.Private.Windows.GdiPlus.dll
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\bin\Release\runtimes\win\lib\net10.0\Microsoft.Win32.SystemEvents.dll
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.csproj.AssemblyReference.cache
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.AssemblyInfoInputs.cache
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.AssemblyInfo.cs
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.csproj.CoreCompileInputs.cache
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.sourcelink.json
+C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTri.4A6AF02A.Up2Date
 C:\Users\t-k3-\source\repos\dev\HappyTrigger\obj\Release\HappyTrigger.dll

@@ -16,6 +16,16 @@ public sealed class PopupImageState
 
     public bool IsPositionSetting { get; }
 
+    public string PositionSettingGroupId { get; } = string.Empty;
+
+    public TriggerLabelSetting? LabelStack { get; }
+
+    public bool HasLabelStack => this.LabelStack != null && !string.IsNullOrWhiteSpace(this.LabelStack.LabelId);
+
+    public bool IsLabelPositionSetting => this.IsPositionSetting && this.HasLabelStack;
+
+    public bool IsGroupedPositionSetting => this.IsPositionSetting && !string.IsNullOrWhiteSpace(this.PositionSettingGroupId);
+
     public bool IsDragging { get; set; }
 
     public bool PositionChanged { get; set; }
@@ -33,10 +43,14 @@ public sealed class PopupImageState
     public PopupImageState(
         HappyTriggerSetting trigger,
         bool isPositionSetting = false,
-        StatusRemainingDisplayState? statusRemainingDisplayState = null)
+        StatusRemainingDisplayState? statusRemainingDisplayState = null,
+        string positionSettingGroupId = "",
+        TriggerLabelSetting? labelStack = null)
     {
         this.Trigger = trigger;
         this.IsPositionSetting = isPositionSetting;
+        this.PositionSettingGroupId = isPositionSetting ? positionSettingGroupId : string.Empty;
+        this.LabelStack = labelStack;
         this.DetectedTimeUtc = DateTime.UtcNow;
 
         if (isPositionSetting)

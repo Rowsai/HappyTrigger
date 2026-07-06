@@ -41,6 +41,10 @@ public sealed class HappyTriggerSetting
     // トリガー管理で所属するトリガーラベルIDです。未設定の場合は未分類扱いです。
     public string TriggerLabelId { get; set; } = string.Empty;
 
+    // true の場合、所属トリガーラベルの基準座標からID順に縦並び表示します。
+    // false の場合、このログトリガー自身の PositionX / PositionY で単独表示します。
+    public bool UseTriggerLabelPosition { get; set; } = true;
+
     public string Keyword { get; set; } = string.Empty;
 
     public bool ExactMatch { get; set; } = false;
@@ -64,6 +68,9 @@ public sealed class HappyTriggerSetting
 
     // EnableStatusRemainingAppend=true の場合に参照するステータス名です。例: 水属性圧縮。
     public string StatusRemainingStatusName { get; set; } = string.Empty;
+
+    // trueの場合、同じステータス名がすでに表示中でも、別メンバーに付与された同名ステータスとして同時表示を許可します。
+    public bool AllowDuplicateStatusRemainingDisplay { get; set; } = false;
 
     // UseFfxivLogReference=true の場合に、バトルログ側で判定する文字列です。
     public string BattleLogKeyword { get; set; } = string.Empty;
@@ -133,6 +140,18 @@ public sealed class HappyTriggerSetting
     // true の場合、描画位置を整数座標に丸めて文字のにじみを抑えます。
     public bool EnableTextPixelSnap { get; set; } = true;
 
+    // true の場合、大きい文字サイズでも見やすいように、Windowsの文字描画でテクスチャ化して表示します。
+    // 秒数表示つきテキストでは、表示幅を固定してブレを抑えます。
+    public bool EnableTextSharpRendering { get; set; } = true;
+
+    // くっきり表示で使用するWindowsフォント名です。
+    // 例: Meiryo / Yu Gothic UI / BIZ UDPGothic / Noto Sans JP。
+    public string TextFontFamilyName { get; set; } = "Meiryo";
+
+    // 任意の .ttf / .otf フォントファイルを指定する場合に使用します。
+    // 空欄の場合は TextFontFamilyName で指定したインストール済みフォントを使用します。
+    public string CustomTextFontPath { get; set; } = string.Empty;
+
     public float TextShadowOffsetX { get; set; } = 3.0f;
 
     public float TextShadowOffsetY { get; set; } = 3.0f;
@@ -180,6 +199,7 @@ public sealed class HappyTriggerSetting
             TriggerName = this.TriggerName,
             TriggerBoxId = this.TriggerBoxId,
             TriggerLabelId = this.TriggerLabelId,
+            UseTriggerLabelPosition = this.UseTriggerLabelPosition,
             Keyword = this.Keyword,
             ExactMatch = this.ExactMatch,
             UseFfxivLogReference = this.UseFfxivLogReference,
@@ -188,6 +208,7 @@ public sealed class HappyTriggerSetting
             EnableStatusRemainingAppend = this.EnableStatusRemainingAppend,
             StatusRemainingJob = this.StatusRemainingJob,
             StatusRemainingStatusName = this.StatusRemainingStatusName,
+            AllowDuplicateStatusRemainingDisplay = this.AllowDuplicateStatusRemainingDisplay,
             BattleLogKeyword = this.BattleLogKeyword,
             InternalLogKeyword = this.InternalLogKeyword,
             InternalLogKeywords = this.GetInternalLogKeywords().ToList(),
@@ -211,6 +232,9 @@ public sealed class HappyTriggerSetting
             TextSize = this.TextSize,
             TextFontDesign = this.TextFontDesign,
             EnableTextPixelSnap = this.EnableTextPixelSnap,
+            EnableTextSharpRendering = this.EnableTextSharpRendering,
+            TextFontFamilyName = this.TextFontFamilyName,
+            CustomTextFontPath = this.CustomTextFontPath,
             TextShadowOffsetX = this.TextShadowOffsetX,
             TextShadowOffsetY = this.TextShadowOffsetY,
             TextShadowColorR = this.TextShadowColorR,
@@ -615,12 +639,53 @@ public sealed class HappyTriggerSetting
         var normalizedTargetText = NormalizeRemainingForMatch(targetText.Trim());
         var normalizedConditionText = NormalizeRemainingForMatch(conditionText.Trim());
 
+        if (IsJobAllCondition(normalizedConditionText))
+        {
+            normalizedTargetText = NormalizeJobFieldForMatch(normalizedTargetText);
+            normalizedConditionText = NormalizeJobFieldForMatch(normalizedConditionText);
+        }
+
         if (this.ExactMatch)
         {
             return string.Equals(normalizedTargetText, normalizedConditionText, StringComparison.OrdinalIgnoreCase);
         }
 
         return normalizedTargetText.Contains(normalizedConditionText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsJobAllCondition(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var jobValue = GetLogFieldValue(value, "job");
+        return string.Equals(jobValue, "ALL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeJobFieldForMatch(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return Regex.Replace(
+            value,
+            @"\bjob\s*=\s*[^\s]+",
+            "job=*",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string GetLogFieldValue(string text, string fieldName)
+    {
+        var match = Regex.Match(
+            text ?? string.Empty,
+            $@"(?:^|\s){Regex.Escape(fieldName)}=(?<value>.*?)(?=\s[A-Za-z][A-Za-z0-9_]*=|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return match.Success ? match.Groups["value"].Value.Trim() : string.Empty;
     }
 
     private static string NormalizeRemainingForMatch(string value)

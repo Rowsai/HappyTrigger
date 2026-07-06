@@ -1,11 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "unCBcq7mOrg=",
+  "dgSpecHash": "hJDlPjxwnE4=",
   "success": true,
   "projectFilePath": "C:\\Users\\t-k3-\\source\\repos\\dev\\HappyTrigger\\HappyTrigger.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\t-k3-\\.nuget\\packages\\dalamudpackager\\15.0.0\\dalamudpackager.15.0.0.nupkg.sha512",
-    "C:\\Users\\t-k3-\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512"
+    "C:\\Users\\t-k3-\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512",
+    "C:\\Users\\t-k3-\\.nuget\\packages\\microsoft.win32.systemevents\\10.0.0\\microsoft.win32.systemevents.10.0.0.nupkg.sha512",
+    "C:\\Users\\t-k3-\\.nuget\\packages\\system.drawing.common\\10.0.0\\system.drawing.common.10.0.0.nupkg.sha512"
   ],
   "logs": []
 }

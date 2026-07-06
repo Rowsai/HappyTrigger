@@ -5,7 +5,7 @@
   },
   "projects": {
     "C:\\Users\\t-k3-\\source\\repos\\dev\\HappyTrigger\\HappyTrigger.csproj": {
-      "version": "0.0.0.6",
+      "version": "0.0.0.8",
       "restore": {
         "projectUniqueName": "C:\\Users\\t-k3-\\source\\repos\\dev\\HappyTrigger\\HappyTrigger.csproj",
         "projectName": "HappyTrigger",
@@ -59,6 +59,10 @@
               "suppressParent": "All",
               "target": "Package",
               "version": "[1.2.39, )"
+            },
+            "System.Drawing.Common": {
+              "target": "Package",
+              "version": "[10.0.0, )"
             }
           },
           "imports": [

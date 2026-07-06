@@ -212,6 +212,70 @@ public static class NativeFileDialogService
         }
     }
 
+    public static bool TryOpenFontFile(out string filePath)
+    {
+        return TryOpenFile(
+            "フォントファイル (*.ttf;*.otf)\0*.ttf;*.otf\0すべてのファイル (*.*)\0*.*\0\0",
+            "フォントファイルを選択",
+            "ttf",
+            out filePath);
+    }
+
+    private static bool TryOpenFile(string filter, string title, string defaultExt, out string filePath)
+    {
+        filePath = string.Empty;
+
+        var fileBuffer = IntPtr.Zero;
+        var filterBuffer = IntPtr.Zero;
+        var titleBuffer = IntPtr.Zero;
+        var defaultExtBuffer = IntPtr.Zero;
+
+        try
+        {
+            fileBuffer = Marshal.AllocHGlobal(MaxPathChars * sizeof(char));
+            ZeroMemory(fileBuffer, MaxPathChars * sizeof(char));
+
+            filterBuffer = Marshal.StringToHGlobalUni(filter);
+            titleBuffer = Marshal.StringToHGlobalUni(title);
+            defaultExtBuffer = Marshal.StringToHGlobalUni(defaultExt);
+
+            var ofn = new OpenFileName
+            {
+                lStructSize = Marshal.SizeOf<OpenFileName>(),
+                hwndOwner = IntPtr.Zero,
+                hInstance = IntPtr.Zero,
+                lpstrFilter = filterBuffer,
+                lpstrFile = fileBuffer,
+                nMaxFile = MaxPathChars,
+                lpstrTitle = titleBuffer,
+                lpstrDefExt = defaultExtBuffer,
+                nFilterIndex = 1,
+                Flags =
+                    OfnExplorer |
+                    OfnFileMustExist |
+                    OfnPathMustExist |
+                    OfnNoChangeDir |
+                    OfnHideReadOnly |
+                    OfnEnableSizing
+            };
+
+            if (!GetOpenFileName(ref ofn))
+            {
+                return false;
+            }
+
+            filePath = Marshal.PtrToStringUni(fileBuffer) ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(filePath);
+        }
+        finally
+        {
+            if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer);
+            if (filterBuffer != IntPtr.Zero) Marshal.FreeHGlobal(filterBuffer);
+            if (titleBuffer != IntPtr.Zero) Marshal.FreeHGlobal(titleBuffer);
+            if (defaultExtBuffer != IntPtr.Zero) Marshal.FreeHGlobal(defaultExtBuffer);
+        }
+    }
+
     private static unsafe void ZeroMemory(IntPtr ptr, int byteCount)
     {
         new Span<byte>(ptr.ToPointer(), byteCount).Clear();

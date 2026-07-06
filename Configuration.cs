@@ -55,4 +55,13 @@ public sealed class TriggerLabelSetting
     public string BoxId { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
+
+    // ラベル配下のログトリガーをまとめて表示するときの基準X座標です。
+    public float PositionX { get; set; } = 100.0f;
+
+    // ラベル配下のログトリガーをまとめて表示するときの基準Y座標です。
+    public float PositionY { get; set; } = 100.0f;
+
+    // ラベル配下のログトリガーを縦並びで表示するときの行間です。
+    public float LineSpacing { get; set; } = 4.0f;
 }
