@@ -15,7 +15,7 @@ HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表
 
 残り時間つきログトリガーを、トリガーラベルの基準座標から縦積み表示できます。
 
-![label stack example](docs/images/label_stack_example.png)
+![label stack example](https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/docs/image/label_stack_example.png)
 
 ---
 
