@@ -64,4 +64,26 @@ public sealed class TriggerLabelSetting
 
     // ラベル配下のログトリガーを縦並びで表示するときの行間です。
     public float LineSpacing { get; set; } = 4.0f;
+
+    // ラベル配下ログトリガーへ継承する発火場所条件です。
+    // None の場合はラベル側では制限せず、ログトリガー自身の場所条件を使用します。
+    // Area / Content の場合は、配下ログトリガー側の場所条件より優先します。
+    public TriggerLocationRestrictionType LocationRestrictionType { get; set; } = TriggerLocationRestrictionType.None;
+
+    // LocationRestrictionType=Area の場合に参照する TerritoryType.RowId です。
+    // LocationRestrictionType=Content の場合も、選択したコンテンツに紐づく TerritoryType.RowId を保持します。
+    public uint RequiredTerritoryTypeId { get; set; } = 0;
+
+    // UI表示用のエリア名キャッシュです。
+    public string RequiredTerritoryName { get; set; } = string.Empty;
+
+    // LocationRestrictionType=Content の場合に参照する ContentFinderCondition.RowId です。
+    public uint RequiredContentFinderConditionId { get; set; } = 0;
+
+    // UI表示用のコンテンツ名キャッシュです。
+    public string RequiredContentName { get; set; } = string.Empty;
+
+    // true の場合、このラベル配下では同じステータス名の残り時間表示を複数同時に許可します。
+    // 例: 「呪詛の叫び声（見る）」と「呪詛の叫び声（見ない）」を別ラベルで同時表示したい場合に使用します。
+    public bool AllowDuplicateStatusRemainingDisplay { get; set; } = false;
 }

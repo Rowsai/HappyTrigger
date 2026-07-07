@@ -78,6 +78,17 @@ public sealed class Plugin : IDalamudPlugin
     // 「マッチ済み」の時点で StatusName をロックします。
     private readonly Dictionary<string, DateTime> activeStatusRemainingMatchLocks = new(StringComparer.OrdinalIgnoreCase);
 
+    // 同一ステータスの複数表示を許可しているラベル/トリガーでも、
+    // 「同じログトリガー自身」が表示中・残り時間中に再マッチして重複表示されるのは避けます。
+    // 例: F00059(Param=1121) と F00058(Param=1122) はそれぞれ1回ずつ表示可能、
+    //     ただし F00059 が表示済みの間に再度 F00059 が揃っても抑止します。
+    private readonly Dictionary<string, DateTime> activeFfxivLogTriggerMatchLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    // 同一ステータス複数表示許可ラベルでは、複数のログトリガーが同じ MemberStatus / EnemyCasting ログを
+    // 猶予時間内に使い回して別テキストを発火してしまうことがあります。
+    // そのため、例外設定が有効なトリガーで一度成立に使用したログは、猶予時間内だけ消費済みとして扱います。
+    private readonly Dictionary<string, DateTime> consumedFfxivLogReferenceLogKeys = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, FfxivLogReferenceMatchState> ffxivLogReferenceMatchStates = new(StringComparer.OrdinalIgnoreCase);
     private bool wasFullWipeDetected = false;
 
@@ -337,7 +348,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool IsTriggerLocationConditionSatisfied(HappyTriggerSetting trigger)
     {
-        if (!trigger.UseFfxivLogReference || trigger.LocationRestrictionType == TriggerLocationRestrictionType.None)
+        if (!trigger.UseFfxivLogReference)
+        {
+            return true;
+        }
+
+        var effectiveLocationCondition = this.GetEffectiveLocationCondition(trigger);
+        if (effectiveLocationCondition.LocationRestrictionType == TriggerLocationRestrictionType.None)
         {
             return true;
         }
@@ -348,14 +365,39 @@ public sealed class Plugin : IDalamudPlugin
             return false;
         }
 
-        var requiredTerritoryTypeId = trigger.RequiredTerritoryTypeId;
-        if (requiredTerritoryTypeId == 0 && trigger.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+        var requiredTerritoryTypeId = effectiveLocationCondition.RequiredTerritoryTypeId;
+        if (requiredTerritoryTypeId == 0 && effectiveLocationCondition.LocationRestrictionType == TriggerLocationRestrictionType.Content)
         {
-            requiredTerritoryTypeId = this.TryGetTerritoryTypeIdFromContentFinderCondition(trigger.RequiredContentFinderConditionId);
+            requiredTerritoryTypeId = this.TryGetTerritoryTypeIdFromContentFinderCondition(effectiveLocationCondition.RequiredContentFinderConditionId);
         }
 
         return requiredTerritoryTypeId != 0 && currentTerritoryTypeId == requiredTerritoryTypeId;
     }
+
+    private EffectiveLocationCondition GetEffectiveLocationCondition(HappyTriggerSetting trigger)
+    {
+        var label = this.configuration.TriggerLabels.FirstOrDefault(label =>
+            !string.IsNullOrWhiteSpace(trigger.TriggerLabelId) &&
+            string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+
+        if (label != null && label.LocationRestrictionType != TriggerLocationRestrictionType.None)
+        {
+            return new EffectiveLocationCondition(
+                label.LocationRestrictionType,
+                label.RequiredTerritoryTypeId,
+                label.RequiredContentFinderConditionId);
+        }
+
+        return new EffectiveLocationCondition(
+            trigger.LocationRestrictionType,
+            trigger.RequiredTerritoryTypeId,
+            trigger.RequiredContentFinderConditionId);
+    }
+
+    private readonly record struct EffectiveLocationCondition(
+        TriggerLocationRestrictionType LocationRestrictionType,
+        uint RequiredTerritoryTypeId,
+        uint RequiredContentFinderConditionId);
 
     private uint TryGetTerritoryTypeIdFromContentFinderCondition(uint contentFinderConditionId)
     {
@@ -512,13 +554,27 @@ public sealed class Plugin : IDalamudPlugin
         // 複数内部ログはゲーム側の出力順が前後することがあるため、順番不問で判定します。
         var state = this.GetFfxivLogReferenceMatchState(trigger);
         this.RemoveExpiredFfxivLogReferenceMatches(state);
+        this.RemoveConsumedFfxivLogReferenceMatches(trigger, state);
 
         if (source == FfxivLogReferenceSource.BattleLog)
         {
+            if (this.ShouldSkipConsumedFfxivLogReferenceLog(trigger, logEntry))
+            {
+                this.AddFfxivLogReferenceMatchDebug(trigger, state, "ConsumedBattleLog");
+                return;
+            }
+
             state.BattleLogMatchedAtUtc = logEntry.Timestamp.ToUniversalTime();
+            state.BattleLogMatchedLogKey = MakeFfxivLogReferenceLogKey(logEntry);
         }
         else if (internalLogKeywordIndex >= 0)
         {
+            if (this.ShouldSkipConsumedFfxivLogReferenceLog(trigger, logEntry))
+            {
+                this.AddFfxivLogReferenceMatchDebug(trigger, state, $"ConsumedInternalLog{internalLogKeywordIndex + 1}");
+                return;
+            }
+
             if (!this.TryRecordInternalLogMatch(trigger, state, internalLogKeywordIndex, logEntry))
             {
                 return;
@@ -538,19 +594,16 @@ public sealed class Plugin : IDalamudPlugin
 
         this.AddFfxivLogReferenceMatchDebug(trigger, state, "Matched");
         this.FireFfxivLogReferenceTrigger(trigger, FfxivLogReferenceSource.All, state.MatchedLogStatusRemainingSnapshot);
+        this.ReserveConsumedFfxivLogReferenceLogs(trigger, state);
 
-        if (trigger.AllowDuplicateStatusRemainingDisplay && trigger.HasStatusRemainingAppendSetting())
-        {
-            // job=ALL などで、同じステータスが別メンバーに続けて付与されるケースがあります。
-            // 全条件マッチ後に状態を完全リセットすると、直前のバトルログ/詠唱ログ条件まで消えてしまい、
-            // 2人目以降の MemberStatus ログだけでは発火できません。
-            // 同時表示ONの場合は、共通条件は猶予秒数の範囲で残し、ステータス付与ログ条件だけを次の入力待ちに戻します。
-            this.RemoveStatusRemainingInternalLogMatches(trigger, state);
-        }
-        else
-        {
-            this.ResetFfxivLogReferenceMatchState(trigger);
-        }
+        // マッチ済み条件は、発火後に必ず全てリセットします。
+        // 以前は「同一ステータスの複数表示許可」がONの場合、MemberStatus 条件だけを外し、
+        // EnemyCasting などの共通条件を状態に残していました。
+        // その結果、Param=1122 で成立した詠唱条件や Param=1121 で成立した詠唱条件が
+        // 次の共通 MemberStatus ログと再結合し、別ラベル/別ログトリガーの表示テキストまで
+        // 同時に発火するケースがありました。
+        // 「設定しているログトリガー以外は表示しない」ため、1回の成立ごとに状態を閉じます。
+        this.ResetFfxivLogReferenceMatchState(trigger);
     }
 
     private void RemoveStatusRemainingInternalLogMatches(HappyTriggerSetting trigger, FfxivLogReferenceMatchState state)
@@ -584,6 +637,7 @@ public sealed class Plugin : IDalamudPlugin
         // 同じ条件が再度マッチした場合は、最新時刻で上書きします。
         // これにより、内部ログ1/2/3 の出現順に依存せず、指定秒数内に全条件が揃えば発火します。
         state.InternalLogMatchedAtUtcByIndex[matchedIndex] = logEntry.Timestamp.ToUniversalTime();
+        state.InternalLogMatchedKeyByIndex[matchedIndex] = MakeFfxivLogReferenceLogKey(logEntry);
         return true;
     }
 
@@ -595,6 +649,7 @@ public sealed class Plugin : IDalamudPlugin
             (nowUtc - state.BattleLogMatchedAtUtc.Value).TotalSeconds > FfxivLogReferencePairWindowSeconds)
         {
             state.BattleLogMatchedAtUtc = null;
+            state.BattleLogMatchedLogKey = null;
         }
 
         var expiredInternalIndexes = state.InternalLogMatchedAtUtcByIndex
@@ -612,7 +667,158 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var expiredInternalIndex in expiredInternalIndexes)
         {
             state.InternalLogMatchedAtUtcByIndex.Remove(expiredInternalIndex);
+            state.InternalLogMatchedKeyByIndex.Remove(expiredInternalIndex);
         }
+    }
+
+    private void RemoveConsumedFfxivLogReferenceMatches(HappyTriggerSetting trigger, FfxivLogReferenceMatchState state)
+    {
+        if (!this.ShouldUseConsumedFfxivLogReferenceGuard(trigger))
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredConsumedFfxivLogReferenceLogKeys(nowUtc);
+
+        if (!string.IsNullOrWhiteSpace(state.BattleLogMatchedLogKey) &&
+            this.consumedFfxivLogReferenceLogKeys.TryGetValue(state.BattleLogMatchedLogKey, out var battleLogConsumedUntilUtc) &&
+            battleLogConsumedUntilUtc > nowUtc)
+        {
+            state.BattleLogMatchedAtUtc = null;
+            state.BattleLogMatchedLogKey = null;
+        }
+
+        var consumedInternalIndexes = state.InternalLogMatchedKeyByIndex
+            .Where(pair => this.consumedFfxivLogReferenceLogKeys.TryGetValue(pair.Value, out var consumedUntilUtc) && consumedUntilUtc > nowUtc)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var consumedInternalIndex in consumedInternalIndexes)
+        {
+            state.InternalLogMatchedAtUtcByIndex.Remove(consumedInternalIndex);
+            state.InternalLogMatchedKeyByIndex.Remove(consumedInternalIndex);
+        }
+    }
+
+    private bool ShouldSkipConsumedFfxivLogReferenceLog(HappyTriggerSetting trigger, FfxivLogEntry logEntry)
+    {
+        if (!this.ShouldUseConsumedFfxivLogReferenceGuard(trigger))
+        {
+            return false;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredConsumedFfxivLogReferenceLogKeys(nowUtc);
+
+        var logKey = MakeFfxivLogReferenceLogKey(logEntry);
+        return this.consumedFfxivLogReferenceLogKeys.TryGetValue(logKey, out var consumedUntilUtc) && consumedUntilUtc > nowUtc;
+    }
+
+    private void ReserveConsumedFfxivLogReferenceLogs(HappyTriggerSetting trigger, FfxivLogReferenceMatchState state)
+    {
+        if (!this.ShouldUseConsumedFfxivLogReferenceGuard(trigger))
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredConsumedFfxivLogReferenceLogKeys(nowUtc);
+
+        var consumedUntilUtc = nowUtc.AddSeconds(Math.Max(0.1, this.FfxivLogReferencePairWindowSeconds));
+
+        if (!string.IsNullOrWhiteSpace(state.BattleLogMatchedLogKey))
+        {
+            this.consumedFfxivLogReferenceLogKeys[state.BattleLogMatchedLogKey] = consumedUntilUtc;
+        }
+
+        foreach (var logKey in state.InternalLogMatchedKeyByIndex.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(logKey))
+            {
+                this.consumedFfxivLogReferenceLogKeys[logKey] = consumedUntilUtc;
+            }
+        }
+    }
+
+    private void RemoveExpiredConsumedFfxivLogReferenceLogKeys(DateTime nowUtc)
+    {
+        var expiredKeys = this.consumedFfxivLogReferenceLogKeys
+            .Where(pair => pair.Value <= nowUtc)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var expiredKey in expiredKeys)
+        {
+            this.consumedFfxivLogReferenceLogKeys.Remove(expiredKey);
+        }
+    }
+
+    private bool ShouldUseConsumedFfxivLogReferenceGuard(HappyTriggerSetting trigger)
+    {
+        // 影響範囲を「同一ステータス複数表示許可」の例外設定かつ、ステータス残り時間表示を持つ
+        // FFXIVログ参照トリガーに限定します。
+        return trigger.HasStatusRemainingAppendSetting() && this.IsDuplicateStatusRemainingDisplayAllowed(trigger);
+    }
+
+    private static string MakeFfxivLogReferenceLogKey(FfxivLogEntry logEntry)
+    {
+        var category = logEntry.Category ?? string.Empty;
+        var text = logEntry.Text ?? string.Empty;
+
+        // 例外設定ONの同一ステータス処理では、jobだけが違う MemberStatus ログが
+        // 同一タイミングに複数行出ることがあります。
+        // 例: job=RPR / job=WHM の 呪詛の叫声 が同じ秒に発生するケース。
+        // 片方だけを消費済みにすると、もう片方が猶予時間内に別トリガーの材料として
+        // 再利用され、「見る」「見ない」などが意図しないタイミングで発火します。
+        //
+        // そのため MemberStatus Information. についてだけ、
+        //   - 発生秒
+        //   - StatusId
+        //   - StatusName
+        //   - Param
+        // を消費キーにし、job と Remaining はキーから外します。
+        // これにより同一秒に出た同一ステータスの別jobログはまとめて消費済みになり、
+        // 別秒に出た同一ステータスログには影響しません。
+        if (text.Contains("MemberStatus Information.", StringComparison.OrdinalIgnoreCase))
+        {
+            var secondBucket = new DateTime(
+                logEntry.Timestamp.Year,
+                logEntry.Timestamp.Month,
+                logEntry.Timestamp.Day,
+                logEntry.Timestamp.Hour,
+                logEntry.Timestamp.Minute,
+                logEntry.Timestamp.Second,
+                logEntry.Timestamp.Kind);
+
+            var statusId = ExtractLogFieldValue(text, "StatusId");
+            var statusName = ExtractLogFieldValue(text, "StatusName");
+            var param = ExtractLogFieldValue(text, "Param");
+
+            if (!string.IsNullOrWhiteSpace(statusId) ||
+                !string.IsNullOrWhiteSpace(statusName) ||
+                !string.IsNullOrWhiteSpace(param))
+            {
+                return $"MemberStatusGroup|{secondBucket.Ticks}|StatusId={statusId}|StatusName={statusName}|Param={param}";
+            }
+        }
+
+        return $"Exact|{logEntry.Timestamp.Ticks}|{category}|{text}";
+    }
+
+    private static string ExtractLogFieldValue(string text, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(fieldName))
+        {
+            return string.Empty;
+        }
+
+        var match = Regex.Match(
+            text,
+            $@"(?:^|\s){Regex.Escape(fieldName)}=([^\s]*)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
     }
 
     private FfxivLogReferenceMatchState GetFfxivLogReferenceMatchState(HappyTriggerSetting trigger)
@@ -776,6 +982,14 @@ public sealed class Plugin : IDalamudPlugin
                 false);
         }
 
+        if (this.ShouldSuppressAlreadyMatchedFfxivLogTrigger(trigger, statusRemainingSnapshot))
+        {
+            this.AddInternalLog(
+                $"FFXIV Log trigger suppressed. Reason=AlreadyMatched Id={trigger.TriggerId} StatusName='{GetStatusRemainingLockName(trigger, statusRemainingSnapshot)}'",
+                false);
+            return;
+        }
+
         if (this.ShouldSuppressDuplicateStatusRemainingTrigger(trigger, statusRemainingSnapshot))
         {
             this.AddInternalLog(
@@ -784,19 +998,128 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
+        this.ReserveAlreadyMatchedFfxivLogTriggerLock(trigger, statusRemainingSnapshot);
         this.ReserveStatusRemainingMatchLock(trigger, statusRemainingSnapshot);
 
         this.AddInternalLog(
-            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName} AllowDuplicate={(trigger.AllowDuplicateStatusRemainingDisplay ? "ON" : "OFF")}" : "OFF")}",
+            $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName} AllowDuplicate={(this.IsDuplicateStatusRemainingDisplayAllowed(trigger) ? "ON" : "OFF")}" : "OFF")}",
             false);
         this.ActivatePopup(trigger, false, statusRemainingSnapshot);
+    }
+
+    private bool IsDuplicateStatusRemainingDisplayAllowed(HappyTriggerSetting trigger)
+    {
+        if (trigger.AllowDuplicateStatusRemainingDisplay)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(trigger.TriggerLabelId))
+        {
+            return false;
+        }
+
+        var label = this.configuration.TriggerLabels.FirstOrDefault(label =>
+            string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+
+        return label?.AllowDuplicateStatusRemainingDisplay == true;
+    }
+
+    private bool ShouldSuppressAlreadyMatchedFfxivLogTrigger(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        // 影響範囲をステータス残り時間つきログトリガーに限定します。
+        // 通常のログトリガーやテキストトリガーの再発火仕様は変えません。
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return false;
+        }
+
+        var triggerId = trigger.TriggerId?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(triggerId))
+        {
+            return false;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredAlreadyMatchedFfxivLogTriggerLocks(nowUtc);
+
+        var lockKey = MakeAlreadyMatchedFfxivLogTriggerLockKey(trigger, statusRemainingSnapshot);
+        if (this.activeFfxivLogTriggerMatchLocks.TryGetValue(lockKey, out var lockedUntilUtc) && lockedUntilUtc > nowUtc)
+        {
+            return true;
+        }
+
+        // activePopups 側も確認します。
+        // これにより、ロックDictionaryだけが消えた/更新タイミングが前後した場合でも、
+        // 同じログトリガーが表示中なら再表示しません。
+        this.activePopups.RemoveAll(x => x.IsClosed || x.IsExpired);
+        return this.activePopups.Any(popup =>
+            !popup.IsClosed &&
+            !popup.IsExpired &&
+            popup.Trigger != null &&
+            string.Equals(popup.Trigger.TriggerId?.Trim(), triggerId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ReserveAlreadyMatchedFfxivLogTriggerLock(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        if (!trigger.HasStatusRemainingAppendSetting())
+        {
+            return;
+        }
+
+        var triggerId = trigger.TriggerId?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(triggerId))
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        this.RemoveExpiredAlreadyMatchedFfxivLogTriggerLocks(nowUtc);
+
+        var lockUntilUtc = nowUtc.AddSeconds(Math.Max(0.1f, trigger.DisplaySeconds));
+        if (statusRemainingSnapshot != null)
+        {
+            var statusRemainingUntilUtc = statusRemainingSnapshot.CapturedAtUtc.AddSeconds(Math.Max(0.1f, statusRemainingSnapshot.RemainingSeconds));
+            if (statusRemainingUntilUtc > lockUntilUtc)
+            {
+                lockUntilUtc = statusRemainingUntilUtc;
+            }
+        }
+
+        this.activeFfxivLogTriggerMatchLocks[MakeAlreadyMatchedFfxivLogTriggerLockKey(trigger, statusRemainingSnapshot)] = lockUntilUtc;
+    }
+
+    private void RemoveExpiredAlreadyMatchedFfxivLogTriggerLocks(DateTime nowUtc)
+    {
+        var expiredKeys = this.activeFfxivLogTriggerMatchLocks
+            .Where(pair => pair.Value <= nowUtc)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var expiredKey in expiredKeys)
+        {
+            this.activeFfxivLogTriggerMatchLocks.Remove(expiredKey);
+        }
+    }
+
+    private static string MakeAlreadyMatchedFfxivLogTriggerLockKey(
+        HappyTriggerSetting trigger,
+        StatusRemainingSnapshot? statusRemainingSnapshot)
+    {
+        var triggerId = trigger.TriggerId?.Trim() ?? string.Empty;
+        var statusName = GetStatusRemainingLockName(trigger, statusRemainingSnapshot);
+        return $"{triggerId}|{statusName}";
     }
 
     private bool ShouldSuppressDuplicateStatusRemainingTrigger(
         HappyTriggerSetting trigger,
         StatusRemainingSnapshot? statusRemainingSnapshot)
     {
-        if (!trigger.HasStatusRemainingAppendSetting() || trigger.AllowDuplicateStatusRemainingDisplay)
+        if (!trigger.HasStatusRemainingAppendSetting() || this.IsDuplicateStatusRemainingDisplayAllowed(trigger))
         {
             return false;
         }
@@ -828,7 +1151,7 @@ public sealed class Plugin : IDalamudPlugin
         HappyTriggerSetting trigger,
         StatusRemainingSnapshot? statusRemainingSnapshot)
     {
-        if (!trigger.HasStatusRemainingAppendSetting() || trigger.AllowDuplicateStatusRemainingDisplay)
+        if (!trigger.HasStatusRemainingAppendSetting() || this.IsDuplicateStatusRemainingDisplayAllowed(trigger))
         {
             return;
         }
@@ -908,6 +1231,8 @@ public sealed class Plugin : IDalamudPlugin
 
         this.ffxivLogReferenceMatchStates.Clear();
         this.activeStatusRemainingMatchLocks.Clear();
+        this.activeFfxivLogTriggerMatchLocks.Clear();
+        this.consumedFfxivLogReferenceLogKeys.Clear();
         this.AddInternalLog("FFXIV Log cleared.");
     }
 
@@ -1651,7 +1976,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private float GetDuplicateStatusRemainingPopupOffset(int currentIndex, PopupImageState popup)
     {
-        if (!popup.HasStatusRemainingDisplay || !popup.Trigger.AllowDuplicateStatusRemainingDisplay)
+        if (!popup.HasStatusRemainingDisplay || !this.IsDuplicateStatusRemainingDisplayAllowed(popup.Trigger))
         {
             return 0.0f;
         }
@@ -1678,7 +2003,7 @@ public sealed class Plugin : IDalamudPlugin
                 continue;
             }
 
-            if (!other.HasStatusRemainingDisplay || !other.Trigger.AllowDuplicateStatusRemainingDisplay)
+            if (!other.HasStatusRemainingDisplay || !this.IsDuplicateStatusRemainingDisplayAllowed(other.Trigger))
             {
                 continue;
             }
@@ -2257,7 +2582,11 @@ public sealed class Plugin : IDalamudPlugin
     {
         public DateTime? BattleLogMatchedAtUtc { get; set; }
 
+        public string? BattleLogMatchedLogKey { get; set; }
+
         public Dictionary<int, DateTime> InternalLogMatchedAtUtcByIndex { get; } = new();
+
+        public Dictionary<int, string> InternalLogMatchedKeyByIndex { get; } = new();
 
         public StatusRemainingSnapshot? MatchedLogStatusRemainingSnapshot { get; set; }
     }
