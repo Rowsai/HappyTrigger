@@ -20,6 +20,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaStatus = Lumina.Excel.Sheets.Status;
+using LuminaContentFinderCondition = Lumina.Excel.Sheets.ContentFinderCondition;
 
 namespace HappyTrigger;
 
@@ -36,6 +37,9 @@ public sealed class Plugin : IDalamudPlugin
 
     [PluginService]
     internal static IChatGui ChatGui { get; private set; } = null!;
+
+    [PluginService]
+    internal static IClientState ClientState { get; private set; } = null!;
 
     [PluginService]
     internal static IObjectTable ObjectTable { get; private set; } = null!;
@@ -331,11 +335,88 @@ public sealed class Plugin : IDalamudPlugin
         return logEntry;
     }
 
+    private bool IsTriggerLocationConditionSatisfied(HappyTriggerSetting trigger)
+    {
+        if (!trigger.UseFfxivLogReference || trigger.LocationRestrictionType == TriggerLocationRestrictionType.None)
+        {
+            return true;
+        }
+
+        var currentTerritoryTypeId = (uint)ClientState.TerritoryType;
+        if (currentTerritoryTypeId == 0)
+        {
+            return false;
+        }
+
+        var requiredTerritoryTypeId = trigger.RequiredTerritoryTypeId;
+        if (requiredTerritoryTypeId == 0 && trigger.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+        {
+            requiredTerritoryTypeId = this.TryGetTerritoryTypeIdFromContentFinderCondition(trigger.RequiredContentFinderConditionId);
+        }
+
+        return requiredTerritoryTypeId != 0 && currentTerritoryTypeId == requiredTerritoryTypeId;
+    }
+
+    private uint TryGetTerritoryTypeIdFromContentFinderCondition(uint contentFinderConditionId)
+    {
+        if (contentFinderConditionId == 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            var contentFinderCondition = DataManager.GetExcelSheet<LuminaContentFinderCondition>()
+                .FirstOrDefault(row => row.RowId == contentFinderConditionId);
+            return TryReadRowIdFromProperty(contentFinderCondition, "TerritoryType");
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, $"Failed to resolve ContentFinderCondition territory. ContentFinderConditionId={contentFinderConditionId}");
+            return 0;
+        }
+    }
+
+    private static uint TryReadRowIdFromProperty(object row, string propertyName)
+    {
+        var property = row.GetType().GetProperty(propertyName);
+        var value = property?.GetValue(row);
+        if (value == null)
+        {
+            return 0;
+        }
+
+        var rowIdProperty = value.GetType().GetProperty("RowId");
+        if (rowIdProperty?.GetValue(value) is uint rowId)
+        {
+            return rowId;
+        }
+
+        var valueProperty = value.GetType().GetProperty("Value");
+        var nestedValue = valueProperty?.GetValue(value);
+        if (nestedValue != null)
+        {
+            var nestedRowIdProperty = nestedValue.GetType().GetProperty("RowId");
+            if (nestedRowIdProperty?.GetValue(nestedValue) is uint nestedRowId)
+            {
+                return nestedRowId;
+            }
+        }
+
+        return 0;
+    }
+
     private void EvaluateBattleLogReferenceTriggers(FfxivLogEntry logEntry)
     {
         foreach (var trigger in this.configuration.FfxivLogTriggers)
         {
             trigger.UseFfxivLogReference = true;
+
+            if (!this.IsTriggerLocationConditionSatisfied(trigger))
+            {
+                this.ResetFfxivLogReferenceMatchState(trigger);
+                continue;
+            }
 
             // バトルログ欄が空の場合は、バトルログでは判定しません。
             if (!trigger.IsBattleLogReferenceMatch(logEntry))
@@ -362,6 +443,12 @@ public sealed class Plugin : IDalamudPlugin
         {
             trigger.UseFfxivLogReference = true;
 
+            if (!this.IsTriggerLocationConditionSatisfied(trigger))
+            {
+                this.ResetFfxivLogReferenceMatchState(trigger);
+                continue;
+            }
+
             var internalLogKeywords = trigger.GetInternalLogKeywords();
             for (var i = 0; i < internalLogKeywords.Count; i++)
             {
@@ -381,6 +468,12 @@ public sealed class Plugin : IDalamudPlugin
         FfxivLogEntry logEntry,
         int internalLogKeywordIndex = -1)
     {
+        if (!this.IsTriggerLocationConditionSatisfied(trigger))
+        {
+            this.ResetFfxivLogReferenceMatchState(trigger);
+            return;
+        }
+
         var requiresBattleLog = !string.IsNullOrWhiteSpace(trigger.BattleLogKeyword);
         var requiredInternalLogCount = trigger.GetInternalLogKeywords().Count;
         var matchedLogStatusRemainingSnapshot = this.TryGetStatusRemainingSnapshotFromMatchedLog(trigger, logEntry, out var parsedStatusRemainingSnapshot)
@@ -669,6 +762,12 @@ public sealed class Plugin : IDalamudPlugin
         FfxivLogReferenceSource source,
         StatusRemainingSnapshot? matchedLogStatusRemainingSnapshot = null)
     {
+        if (!this.IsTriggerLocationConditionSatisfied(trigger))
+        {
+            this.ResetFfxivLogReferenceMatchState(trigger);
+            return;
+        }
+
         StatusRemainingSnapshot? statusRemainingSnapshot = matchedLogStatusRemainingSnapshot;
         if (statusRemainingSnapshot == null && trigger.HasStatusRemainingAppendSetting() && !this.TryGetStatusRemainingSnapshot(trigger, out statusRemainingSnapshot))
         {

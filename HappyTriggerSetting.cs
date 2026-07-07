@@ -14,6 +14,13 @@ public enum TextFontDesign
     Neon = 4,
 }
 
+public enum TriggerLocationRestrictionType
+{
+    None = 0,
+    Area = 1,
+    Content = 2,
+}
+
 [Serializable]
 public sealed class HappyTriggerSetting
 {
@@ -58,6 +65,23 @@ public sealed class HappyTriggerSetting
 
     // UsePrerequisite=true の場合に、前提条件として扱う保存済みトリガーIDです。
     public string PrerequisiteTriggerId { get; set; } = string.Empty;
+
+    // FFXIV Log参照用トリガーを特定のエリア / コンテンツでだけ発火させる条件です。
+    // None の場合は場所を問わず発火します。
+    public TriggerLocationRestrictionType LocationRestrictionType { get; set; } = TriggerLocationRestrictionType.None;
+
+    // LocationRestrictionType=Area の場合に参照する TerritoryType.RowId です。
+    // LocationRestrictionType=Content の場合も、選択したコンテンツに紐づく TerritoryType.RowId を保持し、現在のエリアと比較します。
+    public uint RequiredTerritoryTypeId { get; set; } = 0;
+
+    // UI表示用のエリア名キャッシュです。RowId比較を優先するため、名前が変わっても判定には使いません。
+    public string RequiredTerritoryName { get; set; } = string.Empty;
+
+    // LocationRestrictionType=Content の場合に参照する ContentFinderCondition.RowId です。
+    public uint RequiredContentFinderConditionId { get; set; } = 0;
+
+    // UI表示用のコンテンツ名キャッシュです。
+    public string RequiredContentName { get; set; } = string.Empty;
 
 
     // FFXIV Log参照用トリガーで、表示テキストの末尾にステータス残り時間を付与するかどうかです。
@@ -205,6 +229,11 @@ public sealed class HappyTriggerSetting
             UseFfxivLogReference = this.UseFfxivLogReference,
             UsePrerequisite = this.UsePrerequisite,
             PrerequisiteTriggerId = this.PrerequisiteTriggerId,
+            LocationRestrictionType = this.LocationRestrictionType,
+            RequiredTerritoryTypeId = this.RequiredTerritoryTypeId,
+            RequiredTerritoryName = this.RequiredTerritoryName,
+            RequiredContentFinderConditionId = this.RequiredContentFinderConditionId,
+            RequiredContentName = this.RequiredContentName,
             EnableStatusRemainingAppend = this.EnableStatusRemainingAppend,
             StatusRemainingJob = this.StatusRemainingJob,
             StatusRemainingStatusName = this.StatusRemainingStatusName,

@@ -7,6 +7,8 @@ using System.Numerics;
 using System.Text;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using LuminaContentFinderCondition = Lumina.Excel.Sheets.ContentFinderCondition;
+using LuminaTerritoryType = Lumina.Excel.Sheets.TerritoryType;
 
 namespace HappyTrigger;
 
@@ -85,6 +87,8 @@ public sealed class HappyTriggerWindow : Window
 
     private sealed record VoiceVoxSpeakerOption(int Id, string Label);
 
+    private sealed record LocationSelectOption(uint Id, string Name, uint TerritoryTypeId, string SearchText);
+
     private readonly Configuration configuration;
     private readonly Action saveConfig;
     private readonly Action<HappyTriggerSetting> testTrigger;
@@ -117,6 +121,10 @@ public sealed class HappyTriggerWindow : Window
     private string manualTriggerIdMessage = string.Empty;
     private DeleteConfirmRequest? pendingDeleteConfirmRequest;
     private bool requestOpenDeleteConfirmPopup = false;
+    private string areaFilterText = string.Empty;
+    private string contentFilterText = string.Empty;
+    private List<LocationSelectOption>? cachedAreaOptions;
+    private List<LocationSelectOption>? cachedContentOptions;
 
     private HappyTriggerSetting editTrigger = new();
     private int editingIndex = -1;
@@ -413,6 +421,8 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.PrerequisiteTriggerId = string.Empty;
         }
 
+        this.DrawLocationRestrictionSettingArea();
+
         var battleLogKeyword = RemoveLineBreaks(this.editTrigger.BattleLogKeyword ?? string.Empty);
         ImGui.SetNextItemWidth(700.0f);
         if (InputTextJapanese("バトルログ", ref battleLogKeyword, 2048))
@@ -497,6 +507,312 @@ public sealed class HappyTriggerWindow : Window
         ImGui.TextDisabled("保存時は 内部ログ1_@_内部ログ2_@_内部ログn の形式で保持します。編集時は _@_ で分割して各入力欄に戻します。");
         ImGui.TextDisabled("全角で ＿＠＿ と保存済みの場合も同じ区切り文字として扱います。入力欄内の改行は自動で除去します。");
         ImGui.TextDisabled("バトルログのみ、内部ログのみでも動作します。バトルログと内部ログを両方設定した場合は、すべての条件が揃った場合に発火します。");
+    }
+
+    private void DrawLocationRestrictionSettingArea()
+    {
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("発火場所条件");
+
+        var mode = (int)this.editTrigger.LocationRestrictionType;
+        var modeLabels = new[]
+        {
+            "指定なし",
+            "エリア指定",
+            "コンテンツ指定",
+        };
+
+        ImGui.SetNextItemWidth(220.0f);
+        if (ImGui.Combo("場所条件", ref mode, modeLabels, modeLabels.Length))
+        {
+            this.editTrigger.LocationRestrictionType = (TriggerLocationRestrictionType)mode;
+            if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.None)
+            {
+                this.ClearLocationRestrictionValues();
+            }
+            else if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.Area)
+            {
+                this.editTrigger.RequiredContentFinderConditionId = 0;
+                this.editTrigger.RequiredContentName = string.Empty;
+            }
+            else if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+            {
+                this.editTrigger.RequiredTerritoryName = string.Empty;
+            }
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("指定したエリア / コンテンツにいる場合だけ、このログトリガーを発火します。");
+
+        if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.None)
+        {
+            ImGui.TextDisabled("現在は場所を問わず発火します。");
+            return;
+        }
+
+        if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.Area)
+        {
+            this.DrawLocationOptionSelector(
+                "エリア検索",
+                "エリア候補",
+                ref this.areaFilterText,
+                this.GetAreaOptions(),
+                selected =>
+                {
+                    this.editTrigger.RequiredTerritoryTypeId = selected.TerritoryTypeId;
+                    this.editTrigger.RequiredTerritoryName = selected.Name;
+                    this.editTrigger.RequiredContentFinderConditionId = 0;
+                    this.editTrigger.RequiredContentName = string.Empty;
+                });
+
+            this.DrawSelectedLocationText(
+                this.editTrigger.RequiredTerritoryTypeId,
+                this.editTrigger.RequiredTerritoryName,
+                "未選択です。例: トライヨラを選ぶと、トライヨラにいる時だけ発火します。");
+        }
+        else if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+        {
+            this.DrawLocationOptionSelector(
+                "コンテンツ検索",
+                "コンテンツ候補",
+                ref this.contentFilterText,
+                this.GetContentOptions(),
+                selected =>
+                {
+                    this.editTrigger.RequiredContentFinderConditionId = selected.Id;
+                    this.editTrigger.RequiredContentName = selected.Name;
+                    this.editTrigger.RequiredTerritoryTypeId = selected.TerritoryTypeId;
+                    this.editTrigger.RequiredTerritoryName = string.Empty;
+                });
+
+            var selectedName = this.editTrigger.RequiredContentName;
+            if (string.IsNullOrWhiteSpace(selectedName) && this.editTrigger.RequiredContentFinderConditionId > 0)
+            {
+                selectedName = $"ContentFinderCondition:{this.editTrigger.RequiredContentFinderConditionId}";
+            }
+
+            this.DrawSelectedLocationText(
+                this.editTrigger.RequiredTerritoryTypeId,
+                selectedName,
+                "未選択です。例: 絶妖星乱舞を選ぶと、絶妖星乱舞のコンテンツ中だけ発火します。");
+        }
+    }
+
+    private void ClearLocationRestrictionValues()
+    {
+        this.editTrigger.RequiredTerritoryTypeId = 0;
+        this.editTrigger.RequiredTerritoryName = string.Empty;
+        this.editTrigger.RequiredContentFinderConditionId = 0;
+        this.editTrigger.RequiredContentName = string.Empty;
+    }
+
+    private void DrawSelectedLocationText(uint territoryTypeId, string selectedName, string emptyText)
+    {
+        if (territoryTypeId == 0)
+        {
+            ImGui.TextDisabled(emptyText);
+            return;
+        }
+
+        ImGui.TextColored(
+            new Vector4(0.75f, 1.0f, 0.75f, 1.0f),
+            $"選択中: {selectedName} / TerritoryType:{territoryTypeId}");
+    }
+
+    private void DrawLocationOptionSelector(
+        string filterLabel,
+        string listLabel,
+        ref string filterText,
+        IReadOnlyList<LocationSelectOption> allOptions,
+        Action<LocationSelectOption> onSelected)
+    {
+        ImGui.SetNextItemWidth(420.0f);
+        InputTextJapanese(filterLabel, ref filterText, 256);
+
+        var normalizedFilter = NormalizeSearchText(filterText);
+        var filteredOptions = allOptions
+            .Where(option => string.IsNullOrWhiteSpace(normalizedFilter) || option.SearchText.Contains(normalizedFilter, StringComparison.OrdinalIgnoreCase))
+            .Take(80)
+            .ToList();
+
+        ImGui.SetNextItemWidth(700.0f);
+        if (ImGui.BeginListBox($"{listLabel}##{filterLabel}", new Vector2(700.0f, 180.0f)))
+        {
+            if (filteredOptions.Count == 0)
+            {
+                ImGui.TextDisabled("候補がありません。検索文字を減らしてください。");
+            }
+
+            foreach (var option in filteredOptions)
+            {
+                var isSelected = this.editTrigger.RequiredTerritoryTypeId == option.TerritoryTypeId &&
+                                 (this.editTrigger.LocationRestrictionType != TriggerLocationRestrictionType.Content ||
+                                  this.editTrigger.RequiredContentFinderConditionId == option.Id);
+                var label = option.Id == option.TerritoryTypeId
+                    ? $"{option.Name} / TerritoryType:{option.TerritoryTypeId}"
+                    : $"{option.Name} / Content:{option.Id} / TerritoryType:{option.TerritoryTypeId}";
+
+                if (ImGui.Selectable(label, isSelected))
+                {
+                    onSelected(option);
+
+                    // 候補を選択したら、検索テキストボックスにも選択名を反映します。
+                    // これにより、選択後も現在選んだエリア / コンテンツ名が検索欄に残り、
+                    // どれを選んだか分かりやすくなります。
+                    filterText = option.Name;
+                }
+            }
+
+            ImGui.EndListBox();
+        }
+
+        if (filteredOptions.Count >= 80)
+        {
+            ImGui.TextDisabled("候補が多いため80件まで表示しています。検索文字を追加すると絞り込めます。");
+        }
+    }
+
+    private IReadOnlyList<LocationSelectOption> GetAreaOptions()
+    {
+        if (this.cachedAreaOptions != null)
+        {
+            return this.cachedAreaOptions;
+        }
+
+        var options = new List<LocationSelectOption>();
+        try
+        {
+            foreach (var territory in Plugin.DataManager.GetExcelSheet<LuminaTerritoryType>())
+            {
+                var rowId = territory.RowId;
+                if (rowId == 0)
+                {
+                    continue;
+                }
+
+                var name = TryReadStringFromRowRefProperty(territory, "PlaceName");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                options.Add(new LocationSelectOption(rowId, name, rowId, NormalizeSearchText($"{name} {rowId}")));
+            }
+        }
+        catch
+        {
+            // Excel取得に失敗した場合は空候補として扱います。ゲーム側/ Dalamud側の状態が戻れば再起動後に取得できます。
+        }
+
+        this.cachedAreaOptions = options
+            .GroupBy(option => option.TerritoryTypeId)
+            .Select(group => group.First())
+            .OrderBy(option => option.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(option => option.TerritoryTypeId)
+            .ToList();
+        return this.cachedAreaOptions;
+    }
+
+    private IReadOnlyList<LocationSelectOption> GetContentOptions()
+    {
+        if (this.cachedContentOptions != null)
+        {
+            return this.cachedContentOptions;
+        }
+
+        var options = new List<LocationSelectOption>();
+        try
+        {
+            foreach (var content in Plugin.DataManager.GetExcelSheet<LuminaContentFinderCondition>())
+            {
+                var rowId = content.RowId;
+                if (rowId == 0)
+                {
+                    continue;
+                }
+
+                var name = TryReadStringProperty(content, "Name");
+                var territoryTypeId = TryReadRowIdFromRowRefProperty(content, "TerritoryType");
+                if (string.IsNullOrWhiteSpace(name) || territoryTypeId == 0)
+                {
+                    continue;
+                }
+
+                options.Add(new LocationSelectOption(rowId, name, territoryTypeId, NormalizeSearchText($"{name} {rowId} {territoryTypeId}")));
+            }
+        }
+        catch
+        {
+            // Excel取得に失敗した場合は空候補として扱います。
+        }
+
+        this.cachedContentOptions = options
+            .GroupBy(option => option.Id)
+            .Select(group => group.First())
+            .OrderBy(option => option.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(option => option.Id)
+            .ToList();
+        return this.cachedContentOptions;
+    }
+
+    private static string NormalizeSearchText(string value)
+    {
+        return (value ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static string TryReadStringProperty(object row, string propertyName)
+    {
+        var property = row.GetType().GetProperty(propertyName);
+        var value = property?.GetValue(row);
+        return value?.ToString() ?? string.Empty;
+    }
+
+    private static string TryReadStringFromRowRefProperty(object row, string propertyName)
+    {
+        var property = row.GetType().GetProperty(propertyName);
+        var value = property?.GetValue(row);
+        if (value == null)
+        {
+            return string.Empty;
+        }
+
+        var nestedValue = value.GetType().GetProperty("Value")?.GetValue(value);
+        if (nestedValue == null)
+        {
+            return string.Empty;
+        }
+
+        var nameProperty = nestedValue.GetType().GetProperty("Name");
+        return nameProperty?.GetValue(nestedValue)?.ToString() ?? string.Empty;
+    }
+
+    private static uint TryReadRowIdFromRowRefProperty(object row, string propertyName)
+    {
+        var property = row.GetType().GetProperty(propertyName);
+        var value = property?.GetValue(row);
+        if (value == null)
+        {
+            return 0;
+        }
+
+        var rowIdProperty = value.GetType().GetProperty("RowId");
+        if (rowIdProperty?.GetValue(value) is uint rowId)
+        {
+            return rowId;
+        }
+
+        var nestedValue = value.GetType().GetProperty("Value")?.GetValue(value);
+        if (nestedValue != null)
+        {
+            var nestedRowIdProperty = nestedValue.GetType().GetProperty("RowId");
+            if (nestedRowIdProperty?.GetValue(nestedValue) is uint nestedRowId)
+            {
+                return nestedRowId;
+            }
+        }
+
+        return 0;
     }
 
     private List<string> GetEditingInternalLogKeywordsForUi()
