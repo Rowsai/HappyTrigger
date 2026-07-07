@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Rowsai")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.0.0.9")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.0.0.9+58a9b32d2117cd0ab6c320bdb0dd843ccff8fba2")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.0.0.9+e0e6509e28e81a35f031d8a83e21e4be0b380c5a")]
 [assembly: System.Reflection.AssemblyProductAttribute("HappyTrigger")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HappyTrigger")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.0.0.9")]
