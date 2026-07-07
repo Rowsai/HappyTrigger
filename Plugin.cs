@@ -288,6 +288,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             trigger.DisplayTextMode = false;
 
+            if (!this.IsTriggerHierarchyEnabled(trigger))
+            {
+                continue;
+            }
+
             if (trigger.IsMatch(text))
             {
                 this.AddInternalLog($"Image trigger matched. Keyword='{trigger.Keyword}', Message='{text}'");
@@ -298,6 +303,11 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var trigger in this.configuration.TextTriggers)
         {
             trigger.DisplayTextMode = true;
+
+            if (!this.IsTriggerHierarchyEnabled(trigger))
+            {
+                continue;
+            }
 
             if (trigger.IsMatch(text))
             {
@@ -348,6 +358,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool IsTriggerLocationConditionSatisfied(HappyTriggerSetting trigger)
     {
+        if (!this.IsTriggerHierarchyEnabled(trigger))
+        {
+            return false;
+        }
+
         if (!trigger.UseFfxivLogReference)
         {
             return true;
@@ -374,11 +389,42 @@ public sealed class Plugin : IDalamudPlugin
         return requiredTerritoryTypeId != 0 && currentTerritoryTypeId == requiredTerritoryTypeId;
     }
 
+    private bool IsTriggerHierarchyEnabled(HappyTriggerSetting trigger)
+    {
+        if (!trigger.Enabled)
+        {
+            return false;
+        }
+
+        var label = this.GetTriggerLabel(trigger);
+        if (label != null && !label.Enabled)
+        {
+            return false;
+        }
+
+        var box = this.GetTriggerBox(trigger, label);
+        if (box != null && !box.Enabled)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private EffectiveLocationCondition GetEffectiveLocationCondition(HappyTriggerSetting trigger)
     {
-        var label = this.configuration.TriggerLabels.FirstOrDefault(label =>
-            !string.IsNullOrWhiteSpace(trigger.TriggerLabelId) &&
-            string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+        var label = this.GetTriggerLabel(trigger);
+        var box = this.GetTriggerBox(trigger, label);
+
+        // 優先順: トリガーボックス > トリガーラベル > ログトリガー自身
+        // 上位階層に場所条件が設定されている場合、配下の個別設定より優先します。
+        if (box != null && box.LocationRestrictionType != TriggerLocationRestrictionType.None)
+        {
+            return new EffectiveLocationCondition(
+                box.LocationRestrictionType,
+                box.RequiredTerritoryTypeId,
+                box.RequiredContentFinderConditionId);
+        }
 
         if (label != null && label.LocationRestrictionType != TriggerLocationRestrictionType.None)
         {
@@ -392,6 +438,32 @@ public sealed class Plugin : IDalamudPlugin
             trigger.LocationRestrictionType,
             trigger.RequiredTerritoryTypeId,
             trigger.RequiredContentFinderConditionId);
+    }
+
+    private TriggerLabelSetting? GetTriggerLabel(HappyTriggerSetting trigger)
+    {
+        if (string.IsNullOrWhiteSpace(trigger.TriggerLabelId))
+        {
+            return null;
+        }
+
+        return this.configuration.TriggerLabels.FirstOrDefault(label =>
+            string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private TriggerBoxSetting? GetTriggerBox(HappyTriggerSetting trigger, TriggerLabelSetting? label = null)
+    {
+        var boxId = label != null && !string.IsNullOrWhiteSpace(label.BoxId)
+            ? label.BoxId
+            : trigger.TriggerBoxId;
+
+        if (string.IsNullOrWhiteSpace(boxId))
+        {
+            return null;
+        }
+
+        return this.configuration.TriggerBoxes.FirstOrDefault(box =>
+            string.Equals(box.BoxId, boxId, StringComparison.OrdinalIgnoreCase));
     }
 
     private readonly record struct EffectiveLocationCondition(

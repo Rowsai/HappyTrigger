@@ -59,6 +59,7 @@ public sealed class HappyTriggerWindow : Window
     private const string DeleteConfirmPopupName = "削除確認###HappyTriggerDeleteConfirmPopup";
     private const string ManagementIdEditPopupName = "ID変更###HappyTriggerManagementIdEditPopup";
     private const string LabelLocationSettingPopupName = "トリガーラベル発火場所条件設定###HappyTriggerLabelLocationSettingPopup";
+    private const string BoxLocationSettingPopupName = "トリガーボックス発火場所条件設定###HappyTriggerBoxLocationSettingPopup";
 
     private const int StyleColorCount = 12;
     private const int MaxVisibleLogRows = 30;
@@ -148,6 +149,10 @@ public sealed class HappyTriggerWindow : Window
     private string labelContentFilterText = string.Empty;
     private string labelLocationPopupTargetLabelId = string.Empty;
     private bool requestOpenLabelLocationSettingPopup = false;
+    private string boxAreaFilterText = string.Empty;
+    private string boxContentFilterText = string.Empty;
+    private string boxLocationPopupTargetBoxId = string.Empty;
+    private bool requestOpenBoxLocationSettingPopup = false;
     private List<LocationSelectOption>? cachedAreaOptions;
     private List<LocationSelectOption>? cachedContentOptions;
 
@@ -249,6 +254,7 @@ public sealed class HappyTriggerWindow : Window
 
         this.DrawDeleteConfirmPopup();
         this.DrawManagementIdEditPopup();
+        this.DrawBoxLocationSettingPopup();
         this.DrawLabelLocationSettingPopup();
     }
 
@@ -2052,10 +2058,13 @@ public sealed class HappyTriggerWindow : Window
             return;
         }
 
-        if (ImGui.BeginTable("HappyTriggerBoxTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("HappyTriggerBoxTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("名称");
+            ImGui.TableSetupColumn("発火場所", ImGuiTableColumnFlags.WidthFixed, 220.0f);
+            ImGui.TableSetupColumn("場所設定", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("ラベル数", ImGuiTableColumnFlags.WidthFixed, 80.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 210.0f);
             ImGui.TableHeadersRow();
@@ -2069,6 +2078,18 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.TextUnformatted(box.BoxId);
 
                 ImGui.TableSetColumnIndex(1);
+                var boxEnabled = box.Enabled;
+                if (ImGui.Checkbox($"##box_enabled_{i}", ref boxEnabled))
+                {
+                    box.Enabled = boxEnabled;
+                    this.saveConfig();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("OFFの場合、このボックス配下のラベル / ログトリガーは発火しません。");
+                }
+
+                ImGui.TableSetColumnIndex(2);
                 var name = box.Name ?? string.Empty;
                 ImGui.SetNextItemWidth(-1.0f);
                 if (InputTextJapanese($"##box_name_{i}", ref name, 256))
@@ -2077,11 +2098,20 @@ public sealed class HappyTriggerWindow : Window
                     this.saveConfig();
                 }
 
-                ImGui.TableSetColumnIndex(2);
+                ImGui.TableSetColumnIndex(3);
+                ImGui.TextUnformatted(this.GetTriggerBoxLocationRestrictionSummary(box));
+
+                ImGui.TableSetColumnIndex(4);
+                if (ImGui.SmallButton($"設定##box_location_{i}"))
+                {
+                    this.OpenBoxLocationSettingPopup(box);
+                }
+
+                ImGui.TableSetColumnIndex(5);
                 var labelCount = this.configuration.TriggerLabels.Count(label => string.Equals(label.BoxId, box.BoxId, StringComparison.OrdinalIgnoreCase));
                 ImGui.TextUnformatted(labelCount.ToString());
 
-                ImGui.TableSetColumnIndex(3);
+                ImGui.TableSetColumnIndex(6);
                 if (ImGui.SmallButton($"ID変更##box_id_edit_{i}"))
                 {
                     this.RequestEditTriggerBoxId(box);
@@ -2097,6 +2127,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.EndTable();
         }
     }
+
 
     private void DrawTriggerLabelTable()
     {
@@ -2123,9 +2154,10 @@ public sealed class HappyTriggerWindow : Window
             return;
         }
 
-        if (ImGui.BeginTable("HappyTriggerLabelTable", 11, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("HappyTriggerLabelTable", 12, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
+            ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 70.0f);
             ImGui.TableSetupColumn("所属ボックス", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableSetupColumn("名称");
             ImGui.TableSetupColumn("X", ImGuiTableColumnFlags.WidthFixed, 80.0f);
@@ -2148,9 +2180,21 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.TextUnformatted(label.LabelId);
 
                 ImGui.TableSetColumnIndex(1);
-                ImGui.TextUnformatted(this.GetTriggerBoxDisplayName(label.BoxId, "不明なBOX"));
+                var labelEnabled = label.Enabled;
+                if (ImGui.Checkbox($"##label_enabled_{i}", ref labelEnabled))
+                {
+                    label.Enabled = labelEnabled;
+                    this.saveConfig();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("OFFの場合、このラベル配下のログトリガーは発火しません。");
+                }
 
                 ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(this.GetTriggerBoxDisplayName(label.BoxId, "不明なBOX"));
+
+                ImGui.TableSetColumnIndex(3);
                 var name = label.Name ?? string.Empty;
                 ImGui.SetNextItemWidth(-1.0f);
                 if (InputTextJapanese($"##label_name_{i}", ref name, 256))
@@ -2159,7 +2203,7 @@ public sealed class HappyTriggerWindow : Window
                     this.saveConfig();
                 }
 
-                ImGui.TableSetColumnIndex(3);
+                ImGui.TableSetColumnIndex(4);
                 var labelPositionX = label.PositionX;
                 ImGui.SetNextItemWidth(-1.0f);
                 if (ImGui.DragFloat($"##label_x_{i}", ref labelPositionX, 1.0f, -10000.0f, 10000.0f, "%.0f"))
@@ -2168,7 +2212,7 @@ public sealed class HappyTriggerWindow : Window
                     this.saveConfig();
                 }
 
-                ImGui.TableSetColumnIndex(4);
+                ImGui.TableSetColumnIndex(5);
                 var labelPositionY = label.PositionY;
                 ImGui.SetNextItemWidth(-1.0f);
                 if (ImGui.DragFloat($"##label_y_{i}", ref labelPositionY, 1.0f, -10000.0f, 10000.0f, "%.0f"))
@@ -2177,7 +2221,7 @@ public sealed class HappyTriggerWindow : Window
                     this.saveConfig();
                 }
 
-                ImGui.TableSetColumnIndex(5);
+                ImGui.TableSetColumnIndex(6);
                 var labelLineSpacing = label.LineSpacing;
                 ImGui.SetNextItemWidth(-1.0f);
                 if (ImGui.DragFloat($"##label_spacing_{i}", ref labelLineSpacing, 1.0f, 0.0f, 200.0f, "%.0f"))
@@ -2186,16 +2230,16 @@ public sealed class HappyTriggerWindow : Window
                     this.saveConfig();
                 }
 
-                ImGui.TableSetColumnIndex(6);
+                ImGui.TableSetColumnIndex(7);
                 ImGui.TextUnformatted(this.GetTriggerLabelLocationRestrictionSummary(label));
 
-                ImGui.TableSetColumnIndex(7);
+                ImGui.TableSetColumnIndex(8);
                 if (ImGui.SmallButton($"設定##label_location_{i}"))
                 {
                     this.OpenLabelLocationSettingPopup(label);
                 }
 
-                ImGui.TableSetColumnIndex(8);
+                ImGui.TableSetColumnIndex(9);
                 var allowDuplicateStatusRemainingDisplay = label.AllowDuplicateStatusRemainingDisplay;
                 if (ImGui.Checkbox($"許可##label_duplicate_status_{i}", ref allowDuplicateStatusRemainingDisplay))
                 {
@@ -2207,10 +2251,10 @@ public sealed class HappyTriggerWindow : Window
                     ImGui.SetTooltip("ONの場合、このラベル配下では同じステータス名の残り時間表示を複数同時に表示できます。");
                 }
 
-                ImGui.TableSetColumnIndex(9);
+                ImGui.TableSetColumnIndex(10);
                 ImGui.TextUnformatted(this.GetAllTriggers().Count(trigger => string.Equals(trigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase)).ToString());
 
-                ImGui.TableSetColumnIndex(10);
+                ImGui.TableSetColumnIndex(11);
                 if (ImGui.SmallButton($"ID変更##label_id_edit_{i}"))
                 {
                     this.RequestEditTriggerLabelId(label);
@@ -2225,6 +2269,237 @@ public sealed class HappyTriggerWindow : Window
 
             ImGui.EndTable();
         }
+    }
+
+    private string GetTriggerBoxLocationRestrictionSummary(TriggerBoxSetting box)
+    {
+        return box.LocationRestrictionType switch
+        {
+            TriggerLocationRestrictionType.Area => string.IsNullOrWhiteSpace(box.RequiredTerritoryName)
+                ? $"エリア指定 / TerritoryType:{box.RequiredTerritoryTypeId}"
+                : $"エリア: {box.RequiredTerritoryName}",
+            TriggerLocationRestrictionType.Content => string.IsNullOrWhiteSpace(box.RequiredContentName)
+                ? $"コンテンツ指定 / TerritoryType:{box.RequiredTerritoryTypeId}"
+                : $"コンテンツ: {box.RequiredContentName}",
+            _ => "指定なし（ラベル / ログトリガー側の設定を使用）",
+        };
+    }
+
+    private void OpenBoxLocationSettingPopup(TriggerBoxSetting box)
+    {
+        this.boxLocationPopupTargetBoxId = box.BoxId;
+        this.requestOpenBoxLocationSettingPopup = true;
+
+        this.boxAreaFilterText = box.LocationRestrictionType == TriggerLocationRestrictionType.Area
+            ? box.RequiredTerritoryName ?? string.Empty
+            : string.Empty;
+        this.boxContentFilterText = box.LocationRestrictionType == TriggerLocationRestrictionType.Content
+            ? box.RequiredContentName ?? string.Empty
+            : string.Empty;
+    }
+
+    private void DrawBoxLocationSettingPopup()
+    {
+        if (this.requestOpenBoxLocationSettingPopup)
+        {
+            ImGui.OpenPopup(BoxLocationSettingPopupName);
+            this.requestOpenBoxLocationSettingPopup = false;
+        }
+
+        var opened = true;
+        if (!ImGui.BeginPopupModal(BoxLocationSettingPopupName, ref opened, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        var box = this.configuration.TriggerBoxes.FirstOrDefault(box =>
+            string.Equals(box.BoxId, this.boxLocationPopupTargetBoxId, StringComparison.OrdinalIgnoreCase));
+
+        if (box == null)
+        {
+            ImGui.TextUnformatted("対象のトリガーボックスが見つかりません。");
+            if (ImGui.Button("閉じる", new Vector2(120.0f, 0.0f)))
+            {
+                this.boxLocationPopupTargetBoxId = string.Empty;
+                ImGui.CloseCurrentPopup();
+            }
+
+            if (!opened)
+            {
+                this.boxLocationPopupTargetBoxId = string.Empty;
+            }
+
+            ImGui.EndPopup();
+            return;
+        }
+
+        ImGui.TextUnformatted($"ID：{box.BoxId}");
+        ImGui.TextUnformatted($"トリガーボックス名：{(string.IsNullOrWhiteSpace(box.Name) ? "名称未設定" : box.Name)}");
+        ImGui.Spacing();
+        ImGui.TextWrapped("ここで場所条件を設定すると、このボックス配下のトリガーラベル / ログトリガーはすべてボックス側の条件を継承します。ラベル側やログトリガー側に別のエリア / コンテンツが設定されていても、ボックス側の条件が優先されます。");
+        ImGui.TextDisabled("指定なしの場合は、ボックス側では制限せず、ラベル / ログトリガー側の場所条件を使用します。");
+        ImGui.Separator();
+
+        var mode = (int)box.LocationRestrictionType;
+        var modeLabels = new[]
+        {
+            "指定なし",
+            "エリア指定",
+            "コンテンツ指定",
+        };
+
+        ImGui.SetNextItemWidth(220.0f);
+        if (ImGui.Combo("場所条件", ref mode, modeLabels, modeLabels.Length))
+        {
+            box.LocationRestrictionType = (TriggerLocationRestrictionType)mode;
+            if (box.LocationRestrictionType == TriggerLocationRestrictionType.None)
+            {
+                this.ClearTriggerBoxLocationRestrictionValues(box);
+            }
+            else if (box.LocationRestrictionType == TriggerLocationRestrictionType.Area)
+            {
+                box.RequiredContentFinderConditionId = 0;
+                box.RequiredContentName = string.Empty;
+                this.boxContentFilterText = string.Empty;
+            }
+            else if (box.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+            {
+                box.RequiredTerritoryName = string.Empty;
+                this.boxAreaFilterText = string.Empty;
+            }
+
+            this.saveConfig();
+        }
+
+        if (box.LocationRestrictionType == TriggerLocationRestrictionType.None)
+        {
+            ImGui.TextDisabled("現在はボックス側の場所条件はありません。配下ラベル / ログトリガーの設定が使用されます。");
+        }
+        else if (box.LocationRestrictionType == TriggerLocationRestrictionType.Area)
+        {
+            this.DrawTriggerBoxLocationOptionSelector(
+                "エリア検索##box_area_filter",
+                "エリア候補##box_area_list",
+                ref this.boxAreaFilterText,
+                this.GetAreaOptions(),
+                box,
+                selected =>
+                {
+                    box.RequiredTerritoryTypeId = selected.TerritoryTypeId;
+                    box.RequiredTerritoryName = selected.Name;
+                    box.RequiredContentFinderConditionId = 0;
+                    box.RequiredContentName = string.Empty;
+                    this.saveConfig();
+                });
+
+            this.DrawSelectedLocationText(
+                box.RequiredTerritoryTypeId,
+                box.RequiredTerritoryName,
+                "未選択です。例: トライヨラを選ぶと、このボックス配下はトライヨラにいる時だけ発火します。");
+        }
+        else if (box.LocationRestrictionType == TriggerLocationRestrictionType.Content)
+        {
+            this.DrawTriggerBoxLocationOptionSelector(
+                "コンテンツ検索##box_content_filter",
+                "コンテンツ候補##box_content_list",
+                ref this.boxContentFilterText,
+                this.GetContentOptions(),
+                box,
+                selected =>
+                {
+                    box.RequiredContentFinderConditionId = selected.Id;
+                    box.RequiredContentName = selected.Name;
+                    box.RequiredTerritoryTypeId = selected.TerritoryTypeId;
+                    box.RequiredTerritoryName = string.Empty;
+                    this.saveConfig();
+                });
+
+            var selectedName = box.RequiredContentName;
+            if (string.IsNullOrWhiteSpace(selectedName) && box.RequiredContentFinderConditionId > 0)
+            {
+                selectedName = $"ContentFinderCondition:{box.RequiredContentFinderConditionId}";
+            }
+
+            this.DrawSelectedLocationText(
+                box.RequiredTerritoryTypeId,
+                selectedName,
+                "未選択です。例: 絶妖星乱舞を選ぶと、このボックス配下は絶妖星乱舞のコンテンツ中だけ発火します。");
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("閉じる", new Vector2(120.0f, 0.0f)))
+        {
+            this.boxLocationPopupTargetBoxId = string.Empty;
+            ImGui.CloseCurrentPopup();
+        }
+
+        if (!opened)
+        {
+            this.boxLocationPopupTargetBoxId = string.Empty;
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void DrawTriggerBoxLocationOptionSelector(
+        string filterLabel,
+        string listLabel,
+        ref string filterText,
+        IReadOnlyList<LocationSelectOption> allOptions,
+        TriggerBoxSetting box,
+        Action<LocationSelectOption> onSelected)
+    {
+        ImGui.SetNextItemWidth(420.0f);
+        InputTextJapanese(filterLabel, ref filterText, 256);
+
+        var normalizedFilter = NormalizeSearchText(filterText);
+        var filteredOptions = allOptions
+            .Where(option => string.IsNullOrWhiteSpace(normalizedFilter) || option.SearchText.Contains(normalizedFilter, StringComparison.OrdinalIgnoreCase))
+            .Take(80)
+            .ToList();
+
+        ImGui.SetNextItemWidth(700.0f);
+        if (ImGui.BeginListBox(listLabel, new Vector2(700.0f, 180.0f)))
+        {
+            if (filteredOptions.Count == 0)
+            {
+                ImGui.TextDisabled("候補がありません。検索文字を減らしてください。");
+            }
+
+            foreach (var option in filteredOptions)
+            {
+                var isSelected = box.RequiredTerritoryTypeId == option.TerritoryTypeId &&
+                                 (box.LocationRestrictionType != TriggerLocationRestrictionType.Content ||
+                                  box.RequiredContentFinderConditionId == option.Id);
+                var optionLabel = option.Id == option.TerritoryTypeId
+                    ? $"{option.Name} / TerritoryType:{option.TerritoryTypeId}"
+                    : $"{option.Name} / Content:{option.Id} / TerritoryType:{option.TerritoryTypeId}";
+
+                if (ImGui.Selectable(optionLabel, isSelected))
+                {
+                    onSelected(option);
+                    filterText = option.Name;
+                }
+            }
+
+            ImGui.EndListBox();
+        }
+
+        if (filteredOptions.Count >= 80)
+        {
+            ImGui.TextDisabled("候補が多いため80件まで表示しています。検索文字を追加すると絞り込めます。");
+        }
+    }
+
+    private void ClearTriggerBoxLocationRestrictionValues(TriggerBoxSetting box)
+    {
+        box.RequiredTerritoryTypeId = 0;
+        box.RequiredTerritoryName = string.Empty;
+        box.RequiredContentFinderConditionId = 0;
+        box.RequiredContentName = string.Empty;
     }
 
     private string GetTriggerLabelLocationRestrictionSummary(TriggerLabelSetting label)

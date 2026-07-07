@@ -45,12 +45,31 @@ public sealed class TriggerBoxSetting
     public string BoxId { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
+
+    // OFFの場合、このボックス配下のトリガーラベル / ログトリガーは発火しません。
+    public bool Enabled { get; set; } = true;
+
+    // ボックス配下へ継承する発火場所条件です。
+    // None の場合はボックス側では制限せず、ラベル / ログトリガー側の場所条件を使用します。
+    // Area / Content の場合は、配下のラベル / ログトリガー側の場所条件より優先します。
+    public TriggerLocationRestrictionType LocationRestrictionType { get; set; } = TriggerLocationRestrictionType.None;
+
+    public uint RequiredTerritoryTypeId { get; set; } = 0;
+
+    public string RequiredTerritoryName { get; set; } = string.Empty;
+
+    public uint RequiredContentFinderConditionId { get; set; } = 0;
+
+    public string RequiredContentName { get; set; } = string.Empty;
 }
 
 [Serializable]
 public sealed class TriggerLabelSetting
 {
     public string LabelId { get; set; } = string.Empty;
+
+    // OFFの場合、このラベル配下のログトリガーは発火しません。
+    public bool Enabled { get; set; } = true;
 
     public string BoxId { get; set; } = string.Empty;
 
