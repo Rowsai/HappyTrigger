@@ -2,7 +2,7 @@
   "Author": "Rowsai",
   "Name": "HappyTrigger",
   "InternalName": "HappyTrigger",
-  "AssemblyVersion": "0.0.1.0",
+  "AssemblyVersion": "0.0.1.1",
   "Description": "Display images or text when chat log keywords appear.",
   "Punchline": "Display images or text when chat keywords appear.",
   "ApplicableVersion": "any",

@@ -28,6 +28,21 @@ public sealed class HappyTriggerWindow : Window
         LogTrigger,
     }
 
+    private enum ManagementIdEditTargetKind
+    {
+        TriggerBox,
+        TriggerLabel,
+    }
+
+    private sealed class ManagementIdEditRequest
+    {
+        public ManagementIdEditTargetKind TargetKind { get; set; }
+
+        public string CurrentId { get; set; } = string.Empty;
+
+        public string Name { get; set; } = string.Empty;
+    }
+
     private sealed class DeleteConfirmRequest
     {
         public DeleteTargetKind TargetKind { get; set; }
@@ -42,6 +57,7 @@ public sealed class HappyTriggerWindow : Window
     }
 
     private const string DeleteConfirmPopupName = "削除確認###HappyTriggerDeleteConfirmPopup";
+    private const string ManagementIdEditPopupName = "ID変更###HappyTriggerManagementIdEditPopup";
     private const string LabelLocationSettingPopupName = "トリガーラベル発火場所条件設定###HappyTriggerLabelLocationSettingPopup";
 
     private const int StyleColorCount = 12;
@@ -122,6 +138,10 @@ public sealed class HappyTriggerWindow : Window
     private string manualTriggerIdMessage = string.Empty;
     private DeleteConfirmRequest? pendingDeleteConfirmRequest;
     private bool requestOpenDeleteConfirmPopup = false;
+    private ManagementIdEditRequest? pendingManagementIdEditRequest;
+    private bool requestOpenManagementIdEditPopup = false;
+    private string managementIdEditInput = string.Empty;
+    private string managementIdEditMessage = string.Empty;
     private string areaFilterText = string.Empty;
     private string contentFilterText = string.Empty;
     private string labelAreaFilterText = string.Empty;
@@ -228,6 +248,7 @@ public sealed class HappyTriggerWindow : Window
         }
 
         this.DrawDeleteConfirmPopup();
+        this.DrawManagementIdEditPopup();
         this.DrawLabelLocationSettingPopup();
     }
 
@@ -2036,7 +2057,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("名称");
             ImGui.TableSetupColumn("ラベル数", ImGuiTableColumnFlags.WidthFixed, 80.0f);
-            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 150.0f);
+            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 210.0f);
             ImGui.TableHeadersRow();
 
             for (var i = 0; i < this.configuration.TriggerBoxes.Count; i++)
@@ -2061,6 +2082,12 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.TextUnformatted(labelCount.ToString());
 
                 ImGui.TableSetColumnIndex(3);
+                if (ImGui.SmallButton($"ID変更##box_id_edit_{i}"))
+                {
+                    this.RequestEditTriggerBoxId(box);
+                }
+
+                ImGui.SameLine();
                 if (ImGui.SmallButton($"削除##box_delete_{i}"))
                 {
                     this.RequestDeleteTriggerBox(box);
@@ -2108,7 +2135,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("場所設定", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("同一ステータス", ImGuiTableColumnFlags.WidthFixed, 130.0f);
             ImGui.TableSetupColumn("トリガー数", ImGuiTableColumnFlags.WidthFixed, 90.0f);
-            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 150.0f);
+            ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 210.0f);
             ImGui.TableHeadersRow();
 
             foreach (var item in visibleLabels)
@@ -2184,6 +2211,12 @@ public sealed class HappyTriggerWindow : Window
                 ImGui.TextUnformatted(this.GetAllTriggers().Count(trigger => string.Equals(trigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase)).ToString());
 
                 ImGui.TableSetColumnIndex(10);
+                if (ImGui.SmallButton($"ID変更##label_id_edit_{i}"))
+                {
+                    this.RequestEditTriggerLabelId(label);
+                }
+
+                ImGui.SameLine();
                 if (ImGui.SmallButton($"削除##label_delete_{i}"))
                 {
                     this.RequestDeleteTriggerLabel(label);
@@ -3906,6 +3939,236 @@ public sealed class HappyTriggerWindow : Window
             Id = string.IsNullOrWhiteSpace(label.LabelId) ? "未採番" : label.LabelId.Trim(),
             Name = string.IsNullOrWhiteSpace(label.Name) ? "名称未設定" : label.Name.Trim(),
         });
+    }
+
+
+    private void RequestEditTriggerBoxId(TriggerBoxSetting box)
+    {
+        this.pendingManagementIdEditRequest = new ManagementIdEditRequest
+        {
+            TargetKind = ManagementIdEditTargetKind.TriggerBox,
+            CurrentId = string.IsNullOrWhiteSpace(box.BoxId) ? string.Empty : box.BoxId.Trim(),
+            Name = string.IsNullOrWhiteSpace(box.Name) ? "名称未設定" : box.Name.Trim(),
+        };
+        this.managementIdEditInput = this.pendingManagementIdEditRequest.CurrentId;
+        this.managementIdEditMessage = "トリガーボックスIDは BOX001 のような形式で入力してください。";
+        this.requestOpenManagementIdEditPopup = true;
+    }
+
+    private void RequestEditTriggerLabelId(TriggerLabelSetting label)
+    {
+        this.pendingManagementIdEditRequest = new ManagementIdEditRequest
+        {
+            TargetKind = ManagementIdEditTargetKind.TriggerLabel,
+            CurrentId = string.IsNullOrWhiteSpace(label.LabelId) ? string.Empty : label.LabelId.Trim(),
+            Name = string.IsNullOrWhiteSpace(label.Name) ? "名称未設定" : label.Name.Trim(),
+        };
+        this.managementIdEditInput = this.pendingManagementIdEditRequest.CurrentId;
+        this.managementIdEditMessage = "トリガーラベルIDは Lab001 のような形式で入力してください。";
+        this.requestOpenManagementIdEditPopup = true;
+    }
+
+    private void DrawManagementIdEditPopup()
+    {
+        if (this.requestOpenManagementIdEditPopup)
+        {
+            ImGui.OpenPopup(ManagementIdEditPopupName);
+            this.requestOpenManagementIdEditPopup = false;
+        }
+
+        var opened = true;
+        if (!ImGui.BeginPopupModal(ManagementIdEditPopupName, ref opened, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        var request = this.pendingManagementIdEditRequest;
+        if (request == null)
+        {
+            ImGui.TextUnformatted("ID変更対象が見つかりません。");
+            if (ImGui.Button("閉じる", new Vector2(120.0f, 0.0f)))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+            return;
+        }
+
+        var targetName = request.TargetKind == ManagementIdEditTargetKind.TriggerBox
+            ? "トリガーボックス"
+            : "トリガーラベル";
+
+        ImGui.TextUnformatted($"対象：{targetName}");
+        ImGui.TextUnformatted($"現在ID：{request.CurrentId}");
+        ImGui.TextUnformatted($"名称：{request.Name}");
+        ImGui.Spacing();
+
+        var input = this.managementIdEditInput ?? string.Empty;
+        ImGui.SetNextItemWidth(260.0f);
+        if (InputTextJapanese("新しいID", ref input, 64))
+        {
+            this.managementIdEditInput = RemoveLineBreaks(input).Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(this.managementIdEditMessage))
+        {
+            var color = this.managementIdEditMessage.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+                ? new Vector4(1.0f, 0.35f, 0.35f, 1.0f)
+                : new Vector4(1.0f, 0.92f, 0.25f, 1.0f);
+            ImGui.TextColored(color, this.managementIdEditMessage);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("更新", new Vector2(120.0f, 0.0f)))
+        {
+            if (this.TryApplyManagementIdEdit(request))
+            {
+                this.pendingManagementIdEditRequest = null;
+                this.managementIdEditInput = string.Empty;
+                this.managementIdEditMessage = string.Empty;
+                ImGui.CloseCurrentPopup();
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("キャンセル", new Vector2(120.0f, 0.0f)))
+        {
+            this.pendingManagementIdEditRequest = null;
+            this.managementIdEditInput = string.Empty;
+            this.managementIdEditMessage = string.Empty;
+            ImGui.CloseCurrentPopup();
+        }
+
+        if (!opened)
+        {
+            this.pendingManagementIdEditRequest = null;
+            this.managementIdEditInput = string.Empty;
+            this.managementIdEditMessage = string.Empty;
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private bool TryApplyManagementIdEdit(ManagementIdEditRequest request)
+    {
+        var oldId = request.CurrentId?.Trim() ?? string.Empty;
+        var newId = (this.managementIdEditInput ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(oldId))
+        {
+            this.managementIdEditMessage = "[ERROR]現在IDが空のため変更できません。";
+            return false;
+        }
+
+        if (string.Equals(oldId, newId, StringComparison.OrdinalIgnoreCase))
+        {
+            this.managementIdEditMessage = "[ERROR]現在IDと同じIDです。";
+            return false;
+        }
+
+        if (request.TargetKind == ManagementIdEditTargetKind.TriggerBox)
+        {
+            if (!HappyTriggerSetting.TryGetManagementIdNumber(newId, "BOX", out _))
+            {
+                this.managementIdEditMessage = "[ERROR]トリガーボックスIDは BOX001 のような形式で入力してください。";
+                return false;
+            }
+
+            if (this.configuration.TriggerBoxes.Any(box => string.Equals(box.BoxId, newId, StringComparison.OrdinalIgnoreCase)))
+            {
+                this.managementIdEditMessage = "[ERROR]指定したIDはすでに別のトリガーボックスで使用されています。";
+                return false;
+            }
+
+            return this.UpdateTriggerBoxId(oldId, newId);
+        }
+
+        if (!HappyTriggerSetting.TryGetManagementIdNumber(newId, "Lab", out _))
+        {
+            this.managementIdEditMessage = "[ERROR]トリガーラベルIDは Lab001 のような形式で入力してください。";
+            return false;
+        }
+
+        if (this.configuration.TriggerLabels.Any(label => string.Equals(label.LabelId, newId, StringComparison.OrdinalIgnoreCase)))
+        {
+            this.managementIdEditMessage = "[ERROR]指定したIDはすでに別のトリガーラベルで使用されています。";
+            return false;
+        }
+
+        return this.UpdateTriggerLabelId(oldId, newId);
+    }
+
+    private bool UpdateTriggerBoxId(string oldId, string newId)
+    {
+        var box = this.configuration.TriggerBoxes.FirstOrDefault(box => string.Equals(box.BoxId, oldId, StringComparison.OrdinalIgnoreCase));
+        if (box == null)
+        {
+            this.managementIdEditMessage = "[ERROR]更新対象のトリガーボックスが見つかりません。";
+            return false;
+        }
+
+        box.BoxId = newId;
+
+        foreach (var label in this.configuration.TriggerLabels)
+        {
+            if (string.Equals(label.BoxId, oldId, StringComparison.OrdinalIgnoreCase))
+            {
+                label.BoxId = newId;
+            }
+        }
+
+        foreach (var trigger in this.GetAllTriggers())
+        {
+            if (string.Equals(trigger.TriggerBoxId, oldId, StringComparison.OrdinalIgnoreCase))
+            {
+                trigger.TriggerBoxId = newId;
+            }
+        }
+
+        if (string.Equals(this.selectedManagementBoxId, oldId, StringComparison.OrdinalIgnoreCase))
+        {
+            this.selectedManagementBoxId = newId;
+        }
+
+        if (string.Equals(this.selectedManagementLabelBoxId, oldId, StringComparison.OrdinalIgnoreCase))
+        {
+            this.selectedManagementLabelBoxId = newId;
+        }
+
+        this.saveConfig();
+        return true;
+    }
+
+    private bool UpdateTriggerLabelId(string oldId, string newId)
+    {
+        var label = this.configuration.TriggerLabels.FirstOrDefault(label => string.Equals(label.LabelId, oldId, StringComparison.OrdinalIgnoreCase));
+        if (label == null)
+        {
+            this.managementIdEditMessage = "[ERROR]更新対象のトリガーラベルが見つかりません。";
+            return false;
+        }
+
+        label.LabelId = newId;
+
+        foreach (var trigger in this.GetAllTriggers())
+        {
+            if (string.Equals(trigger.TriggerLabelId, oldId, StringComparison.OrdinalIgnoreCase))
+            {
+                trigger.TriggerLabelId = newId;
+            }
+        }
+
+        if (string.Equals(this.labelLocationPopupTargetLabelId, oldId, StringComparison.OrdinalIgnoreCase))
+        {
+            this.labelLocationPopupTargetLabelId = newId;
+        }
+
+        this.saveConfig();
+        return true;
     }
 
     private void OpenDeleteConfirm(DeleteConfirmRequest request)
