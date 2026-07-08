@@ -58,6 +58,7 @@ public sealed class HappyTriggerWindow : Window
 
     private const string DeleteConfirmPopupName = "削除確認###HappyTriggerDeleteConfirmPopup";
     private const string ManagementIdEditPopupName = "ID変更###HappyTriggerManagementIdEditPopup";
+    private const string ImportCoordinateOverwritePopupName = "Import座標上書き確認###HappyTriggerImportCoordinateOverwritePopup";
     private const string LabelLocationSettingPopupName = "トリガーラベル発火場所条件設定###HappyTriggerLabelLocationSettingPopup";
     private const string BoxLocationSettingPopupName = "トリガーボックス発火場所条件設定###HappyTriggerBoxLocationSettingPopup";
 
@@ -134,6 +135,8 @@ public sealed class HappyTriggerWindow : Window
     private string triggerBoxExportMessage = string.Empty;
     private string importCsvPath = string.Empty;
     private string triggerImportMessage = string.Empty;
+    private List<ImportRow>? pendingImportRows;
+    private bool requestOpenImportCoordinateOverwritePopup = false;
     private string manualTriggerIdEditKey = string.Empty;
     private string manualTriggerIdInput = string.Empty;
     private string manualTriggerIdMessage = string.Empty;
@@ -252,6 +255,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.EndTabBar();
         }
 
+        this.DrawImportCoordinateOverwritePopup();
         this.DrawDeleteConfirmPopup();
         this.DrawManagementIdEditPopup();
         this.DrawBoxLocationSettingPopup();
@@ -2892,17 +2896,23 @@ public sealed class HappyTriggerWindow : Window
                 .ThenBy(item => item.Trigger.TriggerId, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var csv = new StringBuilder();
-            csv.AppendLine(string.Join(",", ExportCsvHeaders.Select(EscapeCsv)));
-
-            foreach (var item in triggers)
+            // CSVはExcelや一般的なCSVパーサーでも安定して扱えるように、
+            // UTF-8 BOM + CRLF + 全フィールドクォートで出力します。
+            // 以前の実装は必要な項目だけをクォートしていたため、
+            // テキスト内の記号・空白・改行・引用符の組み合わせによって、
+            // 一部ツールで不正なCSVとして扱われることがありました。
+            using (var writer = new StreamWriter(filePath, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)))
             {
-                var trigger = item.Trigger;
-                var values = this.GetTriggerExportCsvValues(trigger, item.Location.ListKind, item.Location.Index, boxId, boxName);
-                csv.AppendLine(string.Join(",", values.Select(EscapeCsv)));
+                WriteCsvRow(writer, ExportCsvHeaders);
+
+                foreach (var item in triggers)
+                {
+                    var trigger = item.Trigger;
+                    var values = this.GetTriggerExportCsvValues(trigger, item.Location.ListKind, item.Location.Index, boxId, boxName);
+                    WriteCsvRow(writer, values);
+                }
             }
 
-            File.WriteAllText(filePath, csv.ToString(), new UTF8Encoding(true));
             this.triggerBoxExportMessage = $"CSV export完了: {filePath}";
         }
         catch (Exception ex)
@@ -2935,6 +2945,9 @@ public sealed class HappyTriggerWindow : Window
         "TriggerBoxName",
         "TriggerLabelId",
         "TriggerLabelName",
+        "TriggerLabelPositionX",
+        "TriggerLabelPositionY",
+        "TriggerLabelLineSpacing",
         "UseTriggerLabelPosition",
         "Keyword",
         "ExactMatch",
@@ -2998,9 +3011,12 @@ public sealed class HappyTriggerWindow : Window
         string boxId,
         string boxName)
     {
-        var labelName = string.IsNullOrWhiteSpace(trigger.TriggerLabelId)
+        var label = string.IsNullOrWhiteSpace(trigger.TriggerLabelId)
+            ? null
+            : this.configuration.TriggerLabels.FirstOrDefault(label => string.Equals(label.LabelId, trigger.TriggerLabelId, StringComparison.OrdinalIgnoreCase));
+        var labelName = label == null
             ? string.Empty
-            : this.GetTriggerLabelNameOnly(trigger.TriggerLabelId, "名称未設定");
+            : (string.IsNullOrWhiteSpace(label.Name) ? "名称未設定" : label.Name.Trim());
 
         return new[]
         {
@@ -3013,6 +3029,9 @@ public sealed class HappyTriggerWindow : Window
             boxName,
             trigger.TriggerLabelId ?? string.Empty,
             labelName,
+            label == null ? string.Empty : FloatText(label.PositionX),
+            label == null ? string.Empty : FloatText(label.PositionY),
+            label == null ? string.Empty : FloatText(label.LineSpacing),
             BoolText(trigger.UseTriggerLabelPosition),
             trigger.Keyword ?? string.Empty,
             BoolText(trigger.ExactMatch),
@@ -3086,12 +3105,31 @@ public sealed class HappyTriggerWindow : Window
         return string.IsNullOrWhiteSpace(label.Name) ? fallback : label.Name.Trim();
     }
 
+    private static void WriteCsvRow(TextWriter writer, IEnumerable<string?> values)
+    {
+        var isFirst = true;
+        foreach (var value in values)
+        {
+            if (!isFirst)
+            {
+                writer.Write(',');
+            }
+
+            writer.Write(EscapeCsv(value));
+            isFirst = false;
+        }
+
+        // RFC 4180に合わせてCRLFで改行します。
+        writer.Write("\r\n");
+    }
+
     private static string EscapeCsv(string? value)
     {
+        // 互換性重視で全フィールドを常にダブルクォートします。
+        // 値に含まれるダブルクォートはCSV仕様どおり2つにエスケープします。
         var text = value ?? string.Empty;
-        var mustQuote = text.Contains(',') || text.Contains('"') || text.Contains('\r') || text.Contains('\n');
         text = text.Replace("\"", "\"\"");
-        return mustQuote ? $"\"{text}\"" : text;
+        return $"\"{text}\"";
     }
 
     private static string MakeSafeFileName(string value)
@@ -3137,6 +3175,12 @@ public sealed class HappyTriggerWindow : Window
         public string LabelId { get; init; } = string.Empty;
 
         public string LabelName { get; init; } = string.Empty;
+
+        public float LabelPositionX { get; init; } = 100.0f;
+
+        public float LabelPositionY { get; init; } = 100.0f;
+
+        public float LabelLineSpacing { get; init; } = 4.0f;
     }
 
     private void ImportTriggerCsv(string filePath)
@@ -3145,56 +3189,15 @@ public sealed class HappyTriggerWindow : Window
         {
             var rows = this.LoadAndValidateImportCsv(filePath);
 
-            var boxesToAdd = rows
-                .GroupBy(row => row.BoxId, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new TriggerBoxSetting
-                {
-                    BoxId = group.Key,
-                    Name = group.First().BoxName,
-                })
-                .ToList();
-
-            var labelsToAdd = rows
-                .Where(row => !string.IsNullOrWhiteSpace(row.LabelId))
-                .GroupBy(row => row.LabelId, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new TriggerLabelSetting
-                {
-                    LabelId = group.Key,
-                    BoxId = group.First().BoxId,
-                    Name = group.First().LabelName,
-                })
-                .ToList();
-
-            foreach (var box in boxesToAdd)
+            if (this.HasExistingImportBox(rows))
             {
-                this.configuration.TriggerBoxes.Add(box);
+                this.pendingImportRows = rows;
+                this.requestOpenImportCoordinateOverwritePopup = true;
+                this.triggerImportMessage = "同一トリガーボックスIDが存在します。座標設定の上書きを選択してください。";
+                return;
             }
 
-            foreach (var label in labelsToAdd)
-            {
-                this.configuration.TriggerLabels.Add(label);
-            }
-
-            foreach (var row in rows)
-            {
-                var trigger = row.Trigger.Clone();
-                if (row.ListKind == TriggerListKind.FfxivLog)
-                {
-                    this.configuration.FfxivLogTriggers.Add(trigger);
-                }
-                else if (row.ListKind == TriggerListKind.Text)
-                {
-                    this.configuration.TextTriggers.Add(trigger);
-                }
-                else
-                {
-                    this.configuration.Triggers.Add(trigger);
-                }
-            }
-
-            this.saveConfig();
-            this.selectedManagementTriggerKey = string.Empty;
-            this.triggerImportMessage = $"CSV import完了: {rows.Count}件";
+            this.ExecuteImportTriggerRows(rows, overwriteCoordinates: true);
         }
         catch (IllegalImportException)
         {
@@ -3204,6 +3207,267 @@ public sealed class HappyTriggerWindow : Window
         {
             this.triggerImportMessage = "[ERROR]IllegalImportException : 不正なcsvファイルを指定しています。";
         }
+    }
+
+    private bool HasExistingImportBox(IReadOnlyCollection<ImportRow> rows)
+    {
+        return rows.Any(row => this.configuration.TriggerBoxes.Any(box =>
+            string.Equals(box.BoxId, row.BoxId, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void ExecuteImportTriggerRows(IReadOnlyCollection<ImportRow> rows, bool overwriteCoordinates)
+    {
+        var boxesToAdd = rows
+            .GroupBy(row => row.BoxId, StringComparer.OrdinalIgnoreCase)
+            .Where(group => !this.configuration.TriggerBoxes.Any(box =>
+                string.Equals(box.BoxId, group.Key, StringComparison.OrdinalIgnoreCase)))
+            .Select(group => new TriggerBoxSetting
+            {
+                BoxId = group.Key,
+                Name = group.First().BoxName,
+            })
+            .ToList();
+
+        var labelsToAdd = rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.LabelId))
+            .GroupBy(row => row.LabelId, StringComparer.OrdinalIgnoreCase)
+            .Where(group => !this.configuration.TriggerLabels.Any(label =>
+                string.Equals(label.LabelId, group.Key, StringComparison.OrdinalIgnoreCase)))
+            .Select(group => new TriggerLabelSetting
+            {
+                LabelId = group.Key,
+                BoxId = group.First().BoxId,
+                Name = group.First().LabelName,
+                PositionX = group.First().LabelPositionX,
+                PositionY = group.First().LabelPositionY,
+                LineSpacing = group.First().LabelLineSpacing,
+            })
+            .ToList();
+
+        foreach (var box in boxesToAdd)
+        {
+            this.configuration.TriggerBoxes.Add(box);
+        }
+
+        foreach (var label in labelsToAdd)
+        {
+            this.configuration.TriggerLabels.Add(label);
+        }
+
+        if (overwriteCoordinates)
+        {
+            foreach (var labelRow in rows
+                .Where(row => !string.IsNullOrWhiteSpace(row.LabelId))
+                .GroupBy(row => row.LabelId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First()))
+            {
+                var existingLabel = this.configuration.TriggerLabels.FirstOrDefault(label =>
+                    string.Equals(label.LabelId, labelRow.LabelId, StringComparison.OrdinalIgnoreCase));
+                if (existingLabel == null)
+                {
+                    continue;
+                }
+
+                existingLabel.PositionX = labelRow.LabelPositionX;
+                existingLabel.PositionY = labelRow.LabelPositionY;
+                existingLabel.LineSpacing = labelRow.LabelLineSpacing;
+            }
+        }
+
+        var addedCount = 0;
+        var updatedCount = 0;
+
+        foreach (var row in rows)
+        {
+            var importedTrigger = row.Trigger.Clone();
+            if (this.TryFindTriggerById(importedTrigger.TriggerId, out var existingTrigger, out var existingListKind, out var existingIndex))
+            {
+                if (!overwriteCoordinates)
+                {
+                    importedTrigger.UseTriggerLabelPosition = existingTrigger.UseTriggerLabelPosition;
+                    importedTrigger.PositionX = existingTrigger.PositionX;
+                    importedTrigger.PositionY = existingTrigger.PositionY;
+                }
+
+                this.ReplaceTriggerAt(existingListKind, existingIndex, importedTrigger);
+                updatedCount++;
+                continue;
+            }
+
+            this.AddImportedTrigger(row.ListKind, importedTrigger);
+            addedCount++;
+        }
+
+        this.saveConfig();
+        this.selectedManagementTriggerKey = string.Empty;
+        this.triggerImportMessage = $"CSV import完了: {rows.Count}件 / 追加:{addedCount} 更新:{updatedCount}";
+    }
+
+    private void DrawImportCoordinateOverwritePopup()
+    {
+        if (this.requestOpenImportCoordinateOverwritePopup)
+        {
+            ImGui.OpenPopup(ImportCoordinateOverwritePopupName);
+            this.requestOpenImportCoordinateOverwritePopup = false;
+        }
+
+        var opened = true;
+        if (!ImGui.BeginPopupModal(ImportCoordinateOverwritePopupName, ref opened, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        var rows = this.pendingImportRows;
+        if (rows == null || rows.Count == 0)
+        {
+            ImGui.TextUnformatted("import対象が見つかりません。");
+            if (ImGui.Button("閉じる", new Vector2(120.0f, 0.0f)))
+            {
+                this.pendingImportRows = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+            return;
+        }
+
+        var existingBoxIds = rows
+            .Select(row => row.BoxId)
+            .Where(boxId => this.configuration.TriggerBoxes.Any(box =>
+                string.Equals(box.BoxId, boxId, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(boxId => boxId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        ImGui.TextWrapped("同一のトリガーボックスIDが既に存在します。");
+        ImGui.TextWrapped("座標設定を上書きしますか？");
+        ImGui.Spacing();
+        ImGui.TextUnformatted("対象トリガーボックスID：");
+        foreach (var boxId in existingBoxIds)
+        {
+            ImGui.BulletText(boxId);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("YES：既存ログトリガーと既存トリガーラベルの座標をimport元の座標で上書きします。");
+        ImGui.TextWrapped("NO：既存ログトリガーと既存トリガーラベルの座標は維持し、存在しないログトリガー/ラベルだけimport元の座標を使用します。");
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("YES", new Vector2(120.0f, 0.0f)))
+        {
+            this.ExecuteImportTriggerRows(rows, overwriteCoordinates: true);
+            this.pendingImportRows = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("NO", new Vector2(120.0f, 0.0f)))
+        {
+            this.ExecuteImportTriggerRows(rows, overwriteCoordinates: false);
+            this.pendingImportRows = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("キャンセル", new Vector2(120.0f, 0.0f)))
+        {
+            this.pendingImportRows = null;
+            this.triggerImportMessage = "CSV importをキャンセルしました。";
+            ImGui.CloseCurrentPopup();
+        }
+
+        if (!opened)
+        {
+            this.pendingImportRows = null;
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private bool TryFindTriggerById(
+        string? triggerId,
+        out HappyTriggerSetting trigger,
+        out TriggerListKind listKind,
+        out int index)
+    {
+        if (!string.IsNullOrWhiteSpace(triggerId))
+        {
+            for (var i = 0; i < this.configuration.Triggers.Count; i++)
+            {
+                if (string.Equals(this.configuration.Triggers[i].TriggerId, triggerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    trigger = this.configuration.Triggers[i];
+                    listKind = TriggerListKind.Image;
+                    index = i;
+                    return true;
+                }
+            }
+
+            for (var i = 0; i < this.configuration.TextTriggers.Count; i++)
+            {
+                if (string.Equals(this.configuration.TextTriggers[i].TriggerId, triggerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    trigger = this.configuration.TextTriggers[i];
+                    listKind = TriggerListKind.Text;
+                    index = i;
+                    return true;
+                }
+            }
+
+            for (var i = 0; i < this.configuration.FfxivLogTriggers.Count; i++)
+            {
+                if (string.Equals(this.configuration.FfxivLogTriggers[i].TriggerId, triggerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    trigger = this.configuration.FfxivLogTriggers[i];
+                    listKind = TriggerListKind.FfxivLog;
+                    index = i;
+                    return true;
+                }
+            }
+        }
+
+        trigger = new HappyTriggerSetting();
+        listKind = TriggerListKind.Image;
+        index = -1;
+        return false;
+    }
+
+    private void ReplaceTriggerAt(TriggerListKind listKind, int index, HappyTriggerSetting trigger)
+    {
+        if (listKind == TriggerListKind.FfxivLog)
+        {
+            this.configuration.FfxivLogTriggers[index] = trigger;
+            return;
+        }
+
+        if (listKind == TriggerListKind.Text)
+        {
+            this.configuration.TextTriggers[index] = trigger;
+            return;
+        }
+
+        this.configuration.Triggers[index] = trigger;
+    }
+
+    private void AddImportedTrigger(TriggerListKind listKind, HappyTriggerSetting trigger)
+    {
+        if (listKind == TriggerListKind.FfxivLog)
+        {
+            this.configuration.FfxivLogTriggers.Add(trigger);
+            return;
+        }
+
+        if (listKind == TriggerListKind.Text)
+        {
+            this.configuration.TextTriggers.Add(trigger);
+            return;
+        }
+
+        this.configuration.Triggers.Add(trigger);
     }
 
     private List<ImportRow> LoadAndValidateImportCsv(string filePath)
@@ -3242,8 +3506,8 @@ public sealed class HappyTriggerWindow : Window
 
         foreach (var requiredHeader in ExportCsvHeaders)
         {
-            // 旧CSV互換: この列がない場合は true として読み込みます。
-            if (string.Equals(requiredHeader, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase))
+            // 旧CSV互換: 後から追加した列がない場合は既定値として読み込みます。
+            if (IsOptionalImportHeader(requiredHeader))
             {
                 continue;
             }
@@ -3254,9 +3518,16 @@ public sealed class HappyTriggerWindow : Window
             }
         }
 
-        var savedTriggerIds = new HashSet<string>(this.GetAllTriggers().Select(trigger => trigger.TriggerId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
+        var savedTriggersById = this.GetAllTriggers()
+            .Where(trigger => !string.IsNullOrWhiteSpace(trigger.TriggerId))
+            .GroupBy(trigger => trigger.TriggerId!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var savedTriggerIds = new HashSet<string>(savedTriggersById.Keys, StringComparer.OrdinalIgnoreCase);
         var savedBoxIds = new HashSet<string>(this.configuration.TriggerBoxes.Select(box => box.BoxId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
-        var savedLabelIds = new HashSet<string>(this.configuration.TriggerLabels.Select(label => label.LabelId).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!), StringComparer.OrdinalIgnoreCase);
+        var savedLabelsById = this.configuration.TriggerLabels
+            .Where(label => !string.IsNullOrWhiteSpace(label.LabelId))
+            .GroupBy(label => label.LabelId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var importTriggerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var importBoxNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var importLabelRows = new Dictionary<string, ImportRow>(StringComparer.OrdinalIgnoreCase);
@@ -3351,9 +3622,22 @@ public sealed class HappyTriggerWindow : Window
             ValidateImportedTriggerKind(listKind, trigger);
             ValidateImportedTriggerValues(trigger);
 
-            if (savedTriggerIds.Contains(trigger.TriggerId) || !importTriggerIds.Add(trigger.TriggerId))
+            if (!importTriggerIds.Add(trigger.TriggerId))
             {
-                throw new IllegalImportException("トリガーIDが重複しています。");
+                throw new IllegalImportException("CSV内でトリガーIDが重複しています。");
+            }
+
+            if (savedTriggersById.TryGetValue(trigger.TriggerId, out var savedTrigger))
+            {
+                if (!string.Equals(savedTrigger.TriggerBoxId, trigger.TriggerBoxId, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IllegalImportException("既存トリガーIDが別のトリガーボックスに存在します。");
+                }
+
+                if (!this.TryFindTriggerLocation(savedTrigger, out var savedListKind, out _) || savedListKind != listKind)
+                {
+                    throw new IllegalImportException("既存トリガーIDの種類がimport元と一致しません。");
+                }
             }
 
             var boxId = trigger.TriggerBoxId.Trim();
@@ -3361,11 +3645,6 @@ public sealed class HappyTriggerWindow : Window
             if (!HappyTriggerSetting.TryGetManagementIdNumber(boxId, "BOX", out _))
             {
                 throw new IllegalImportException("トリガーボックスIDが不正です。");
-            }
-
-            if (savedBoxIds.Contains(boxId))
-            {
-                throw new IllegalImportException("トリガーボックスIDが既に存在します。");
             }
 
             if (importBoxNames.TryGetValue(boxId, out var existingBoxName))
@@ -3382,6 +3661,9 @@ public sealed class HappyTriggerWindow : Window
 
             var labelId = trigger.TriggerLabelId.Trim();
             var labelName = NormalizeImportedName(Get(row, "TriggerLabelName"));
+            var labelPositionX = ParseOptionalFloat(row, "TriggerLabelPositionX", 100.0f);
+            var labelPositionY = ParseOptionalFloat(row, "TriggerLabelPositionY", 100.0f);
+            var labelLineSpacing = Math.Max(0.0f, ParseOptionalFloat(row, "TriggerLabelLineSpacing", 4.0f));
             if (!string.IsNullOrWhiteSpace(labelId))
             {
                 if (!HappyTriggerSetting.TryGetManagementIdNumber(labelId, "Lab", out _))
@@ -3389,9 +3671,10 @@ public sealed class HappyTriggerWindow : Window
                     throw new IllegalImportException("トリガーラベルIDが不正です。");
                 }
 
-                if (savedLabelIds.Contains(labelId))
+                if (savedLabelsById.TryGetValue(labelId, out var savedLabel) &&
+                    !string.Equals(savedLabel.BoxId, boxId, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new IllegalImportException("トリガーラベルIDが既に存在します。");
+                    throw new IllegalImportException("既存トリガーラベルIDが別のトリガーボックスに存在します。");
                 }
 
             }
@@ -3404,6 +3687,9 @@ public sealed class HappyTriggerWindow : Window
                 BoxName = boxName,
                 LabelId = labelId,
                 LabelName = labelName,
+                LabelPositionX = labelPositionX,
+                LabelPositionY = labelPositionY,
+                LabelLineSpacing = labelLineSpacing,
             };
 
             if (!string.IsNullOrWhiteSpace(labelId))
@@ -3411,7 +3697,10 @@ public sealed class HappyTriggerWindow : Window
                 if (importLabelRows.TryGetValue(labelId, out var existingLabelRow))
                 {
                     if (!string.Equals(existingLabelRow.BoxId, boxId, StringComparison.OrdinalIgnoreCase)
-                        || !string.Equals(existingLabelRow.LabelName, labelName, StringComparison.Ordinal))
+                        || !string.Equals(existingLabelRow.LabelName, labelName, StringComparison.Ordinal)
+                        || Math.Abs(existingLabelRow.LabelPositionX - labelPositionX) > 0.001f
+                        || Math.Abs(existingLabelRow.LabelPositionY - labelPositionY) > 0.001f
+                        || Math.Abs(existingLabelRow.LabelLineSpacing - labelLineSpacing) > 0.001f)
                     {
                         throw new IllegalImportException("同一ラベルIDに異なる情報が設定されています。");
                     }
@@ -3523,6 +3812,20 @@ public sealed class HappyTriggerWindow : Window
         }
 
         return rows;
+    }
+
+    private static bool IsOptionalImportHeader(string header)
+    {
+        return string.Equals(header, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(header, "TriggerLabelPositionX", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(header, "TriggerLabelPositionY", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(header, "TriggerLabelLineSpacing", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static float ParseOptionalFloat(IReadOnlyDictionary<string, string> row, string key, float defaultValue)
+    {
+        var value = Get(row, key);
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : ParseFloat(value);
     }
 
     private static string GetRequired(IReadOnlyDictionary<string, string> row, string key)
@@ -4225,8 +4528,8 @@ public sealed class HappyTriggerWindow : Window
             CurrentId = string.IsNullOrWhiteSpace(box.BoxId) ? string.Empty : box.BoxId.Trim(),
             Name = string.IsNullOrWhiteSpace(box.Name) ? "名称未設定" : box.Name.Trim(),
         };
-        this.managementIdEditInput = this.pendingManagementIdEditRequest.CurrentId;
-        this.managementIdEditMessage = "トリガーボックスIDは BOX001 のような形式で入力してください。";
+        this.managementIdEditInput = GetManagementIdNumberPart(this.pendingManagementIdEditRequest.CurrentId, "BOX");
+        this.managementIdEditMessage = "トリガーボックスIDの番号部分だけを3桁で入力してください。（例：BOX001 → 001）";
         this.requestOpenManagementIdEditPopup = true;
     }
 
@@ -4238,8 +4541,8 @@ public sealed class HappyTriggerWindow : Window
             CurrentId = string.IsNullOrWhiteSpace(label.LabelId) ? string.Empty : label.LabelId.Trim(),
             Name = string.IsNullOrWhiteSpace(label.Name) ? "名称未設定" : label.Name.Trim(),
         };
-        this.managementIdEditInput = this.pendingManagementIdEditRequest.CurrentId;
-        this.managementIdEditMessage = "トリガーラベルIDは Lab001 のような形式で入力してください。";
+        this.managementIdEditInput = GetManagementIdNumberPart(this.pendingManagementIdEditRequest.CurrentId, "Lab");
+        this.managementIdEditMessage = "トリガーラベルIDの番号部分だけを3桁で入力してください。（例：Lab001 → 001）";
         this.requestOpenManagementIdEditPopup = true;
     }
 
@@ -4273,18 +4576,28 @@ public sealed class HappyTriggerWindow : Window
         var targetName = request.TargetKind == ManagementIdEditTargetKind.TriggerBox
             ? "トリガーボックス"
             : "トリガーラベル";
+        var fixedPrefix = GetManagementIdPrefix(request.TargetKind);
 
         ImGui.TextUnformatted($"対象：{targetName}");
         ImGui.TextUnformatted($"現在ID：{request.CurrentId}");
         ImGui.TextUnformatted($"名称：{request.Name}");
         ImGui.Spacing();
+        ImGui.TextUnformatted($"固定プレフィックス：{fixedPrefix}");
+        ImGui.SameLine();
+        ImGui.TextDisabled("※この部分は変更できません");
 
         var input = this.managementIdEditInput ?? string.Empty;
-        ImGui.SetNextItemWidth(260.0f);
-        if (InputTextJapanese("新しいID", ref input, 64))
+        ImGui.SetNextItemWidth(120.0f);
+        if (InputTextJapanese("新しい番号", ref input, 8))
         {
-            this.managementIdEditInput = RemoveLineBreaks(input).Trim();
+            this.managementIdEditInput = NormalizeManagementIdNumberInput(input);
         }
+
+        var previewNumber = this.managementIdEditInput ?? string.Empty;
+        var previewId = previewNumber.Length == 3
+            ? fixedPrefix + previewNumber
+            : fixedPrefix + "***";
+        ImGui.TextUnformatted($"変更後ID：{previewId}");
 
         if (!string.IsNullOrWhiteSpace(this.managementIdEditMessage))
         {
@@ -4331,11 +4644,29 @@ public sealed class HappyTriggerWindow : Window
     private bool TryApplyManagementIdEdit(ManagementIdEditRequest request)
     {
         var oldId = request.CurrentId?.Trim() ?? string.Empty;
-        var newId = (this.managementIdEditInput ?? string.Empty).Trim();
+        var prefix = GetManagementIdPrefix(request.TargetKind);
+        var numberPart = NormalizeManagementIdNumberInput(this.managementIdEditInput ?? string.Empty);
+        var newId = prefix + numberPart;
 
         if (string.IsNullOrWhiteSpace(oldId))
         {
             this.managementIdEditMessage = "[ERROR]現在IDが空のため変更できません。";
+            return false;
+        }
+
+        if (numberPart.Length != 3 || !numberPart.All(char.IsDigit) || numberPart == "000")
+        {
+            this.managementIdEditMessage = request.TargetKind == ManagementIdEditTargetKind.TriggerBox
+                ? "[ERROR]トリガーボックスIDは BOX の後ろ3桁だけ入力してください。（例：001）"
+                : "[ERROR]トリガーラベルIDは Lab の後ろ3桁だけ入力してください。（例：001）";
+            return false;
+        }
+
+        if (!HappyTriggerSetting.TryGetManagementIdNumber(newId, prefix, out _))
+        {
+            this.managementIdEditMessage = request.TargetKind == ManagementIdEditTargetKind.TriggerBox
+                ? "[ERROR]トリガーボックスIDは BOX001 の形式になるように番号を入力してください。"
+                : "[ERROR]トリガーラベルIDは Lab001 の形式になるように番号を入力してください。";
             return false;
         }
 
@@ -4347,12 +4678,6 @@ public sealed class HappyTriggerWindow : Window
 
         if (request.TargetKind == ManagementIdEditTargetKind.TriggerBox)
         {
-            if (!HappyTriggerSetting.TryGetManagementIdNumber(newId, "BOX", out _))
-            {
-                this.managementIdEditMessage = "[ERROR]トリガーボックスIDは BOX001 のような形式で入力してください。";
-                return false;
-            }
-
             if (this.configuration.TriggerBoxes.Any(box => string.Equals(box.BoxId, newId, StringComparison.OrdinalIgnoreCase)))
             {
                 this.managementIdEditMessage = "[ERROR]指定したIDはすでに別のトリガーボックスで使用されています。";
@@ -4362,12 +4687,6 @@ public sealed class HappyTriggerWindow : Window
             return this.UpdateTriggerBoxId(oldId, newId);
         }
 
-        if (!HappyTriggerSetting.TryGetManagementIdNumber(newId, "Lab", out _))
-        {
-            this.managementIdEditMessage = "[ERROR]トリガーラベルIDは Lab001 のような形式で入力してください。";
-            return false;
-        }
-
         if (this.configuration.TriggerLabels.Any(label => string.Equals(label.LabelId, newId, StringComparison.OrdinalIgnoreCase)))
         {
             this.managementIdEditMessage = "[ERROR]指定したIDはすでに別のトリガーラベルで使用されています。";
@@ -4375,6 +4694,33 @@ public sealed class HappyTriggerWindow : Window
         }
 
         return this.UpdateTriggerLabelId(oldId, newId);
+    }
+
+    private static string GetManagementIdPrefix(ManagementIdEditTargetKind targetKind)
+    {
+        return targetKind == ManagementIdEditTargetKind.TriggerBox ? "BOX" : "Lab";
+    }
+
+    private static string GetManagementIdNumberPart(string id, string prefix)
+    {
+        if (HappyTriggerSetting.TryGetManagementIdNumber(id, prefix, out var number))
+        {
+            return number.ToString("D3", CultureInfo.InvariantCulture);
+        }
+
+        var trimmed = id?.Trim() ?? string.Empty;
+        if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && trimmed.Length > prefix.Length)
+        {
+            return NormalizeManagementIdNumberInput(trimmed[prefix.Length..]);
+        }
+
+        return string.Empty;
+    }
+
+    private static string NormalizeManagementIdNumberInput(string input)
+    {
+        var digits = new string((input ?? string.Empty).Where(char.IsDigit).Take(3).ToArray());
+        return digits;
     }
 
     private bool UpdateTriggerBoxId(string oldId, string newId)
