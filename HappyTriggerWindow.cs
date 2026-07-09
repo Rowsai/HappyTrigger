@@ -2158,7 +2158,7 @@ public sealed class HappyTriggerWindow : Window
             return;
         }
 
-        if (ImGui.BeginTable("HappyTriggerLabelTable", 12, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("HappyTriggerLabelTable", 13, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 70.0f);
@@ -2170,6 +2170,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.TableSetupColumn("発火場所", ImGuiTableColumnFlags.WidthFixed, 220.0f);
             ImGui.TableSetupColumn("場所設定", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("同一ステータス", ImGuiTableColumnFlags.WidthFixed, 130.0f);
+            ImGui.TableSetupColumn("同時刻再利用", ImGuiTableColumnFlags.WidthFixed, 130.0f);
             ImGui.TableSetupColumn("トリガー数", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("操作", ImGuiTableColumnFlags.WidthFixed, 210.0f);
             ImGui.TableHeadersRow();
@@ -2256,9 +2257,21 @@ public sealed class HappyTriggerWindow : Window
                 }
 
                 ImGui.TableSetColumnIndex(10);
-                ImGui.TextUnformatted(this.GetAllTriggers().Count(trigger => string.Equals(trigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase)).ToString());
+                var suppressSameTimestampInternalLogReuse = label.SuppressSameTimestampInternalLogReuse;
+                if (ImGui.Checkbox($"抑止##label_same_timestamp_reuse_{i}", ref suppressSameTimestampInternalLogReuse))
+                {
+                    label.SuppressSameTimestampInternalLogReuse = suppressSameTimestampInternalLogReuse;
+                    this.saveConfig();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("ONの場合、同一ステータス複数表示の例外設定内で、同一タイムスタンプの内部ログを別トリガーの組み合わせ材料として再利用しません。デフォルトはOFFです。");
+                }
 
                 ImGui.TableSetColumnIndex(11);
+                ImGui.TextUnformatted(this.GetAllTriggers().Count(trigger => string.Equals(trigger.TriggerLabelId, label.LabelId, StringComparison.OrdinalIgnoreCase)).ToString());
+
+                ImGui.TableSetColumnIndex(12);
                 if (ImGui.SmallButton($"ID変更##label_id_edit_{i}"))
                 {
                     this.RequestEditTriggerLabelId(label);
@@ -2948,6 +2961,7 @@ public sealed class HappyTriggerWindow : Window
         "TriggerLabelPositionX",
         "TriggerLabelPositionY",
         "TriggerLabelLineSpacing",
+        "TriggerLabelSuppressSameTimestampInternalLogReuse",
         "UseTriggerLabelPosition",
         "Keyword",
         "ExactMatch",
@@ -3032,6 +3046,7 @@ public sealed class HappyTriggerWindow : Window
             label == null ? string.Empty : FloatText(label.PositionX),
             label == null ? string.Empty : FloatText(label.PositionY),
             label == null ? string.Empty : FloatText(label.LineSpacing),
+            label == null ? string.Empty : BoolText(label.SuppressSameTimestampInternalLogReuse),
             BoolText(trigger.UseTriggerLabelPosition),
             trigger.Keyword ?? string.Empty,
             BoolText(trigger.ExactMatch),
@@ -3181,6 +3196,8 @@ public sealed class HappyTriggerWindow : Window
         public float LabelPositionY { get; init; } = 100.0f;
 
         public float LabelLineSpacing { get; init; } = 4.0f;
+
+        public bool LabelSuppressSameTimestampInternalLogReuse { get; init; } = false;
     }
 
     private void ImportTriggerCsv(string filePath)
@@ -3241,6 +3258,7 @@ public sealed class HappyTriggerWindow : Window
                 PositionX = group.First().LabelPositionX,
                 PositionY = group.First().LabelPositionY,
                 LineSpacing = group.First().LabelLineSpacing,
+                SuppressSameTimestampInternalLogReuse = group.First().LabelSuppressSameTimestampInternalLogReuse,
             })
             .ToList();
 
@@ -3271,6 +3289,20 @@ public sealed class HappyTriggerWindow : Window
                 existingLabel.PositionX = labelRow.LabelPositionX;
                 existingLabel.PositionY = labelRow.LabelPositionY;
                 existingLabel.LineSpacing = labelRow.LabelLineSpacing;
+                existingLabel.SuppressSameTimestampInternalLogReuse = labelRow.LabelSuppressSameTimestampInternalLogReuse;
+            }
+        }
+
+        foreach (var labelRow in rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.LabelId))
+            .GroupBy(row => row.LabelId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First()))
+        {
+            var existingLabel = this.configuration.TriggerLabels.FirstOrDefault(label =>
+                string.Equals(label.LabelId, labelRow.LabelId, StringComparison.OrdinalIgnoreCase));
+            if (existingLabel != null)
+            {
+                existingLabel.SuppressSameTimestampInternalLogReuse = labelRow.LabelSuppressSameTimestampInternalLogReuse;
             }
         }
 
@@ -3664,6 +3696,7 @@ public sealed class HappyTriggerWindow : Window
             var labelPositionX = ParseOptionalFloat(row, "TriggerLabelPositionX", 100.0f);
             var labelPositionY = ParseOptionalFloat(row, "TriggerLabelPositionY", 100.0f);
             var labelLineSpacing = Math.Max(0.0f, ParseOptionalFloat(row, "TriggerLabelLineSpacing", 4.0f));
+            var labelSuppressSameTimestampInternalLogReuse = ParseOptionalBool(row, "TriggerLabelSuppressSameTimestampInternalLogReuse", false);
             if (!string.IsNullOrWhiteSpace(labelId))
             {
                 if (!HappyTriggerSetting.TryGetManagementIdNumber(labelId, "Lab", out _))
@@ -3690,6 +3723,7 @@ public sealed class HappyTriggerWindow : Window
                 LabelPositionX = labelPositionX,
                 LabelPositionY = labelPositionY,
                 LabelLineSpacing = labelLineSpacing,
+                LabelSuppressSameTimestampInternalLogReuse = labelSuppressSameTimestampInternalLogReuse,
             };
 
             if (!string.IsNullOrWhiteSpace(labelId))
@@ -3700,7 +3734,8 @@ public sealed class HappyTriggerWindow : Window
                         || !string.Equals(existingLabelRow.LabelName, labelName, StringComparison.Ordinal)
                         || Math.Abs(existingLabelRow.LabelPositionX - labelPositionX) > 0.001f
                         || Math.Abs(existingLabelRow.LabelPositionY - labelPositionY) > 0.001f
-                        || Math.Abs(existingLabelRow.LabelLineSpacing - labelLineSpacing) > 0.001f)
+                        || Math.Abs(existingLabelRow.LabelLineSpacing - labelLineSpacing) > 0.001f
+                        || existingLabelRow.LabelSuppressSameTimestampInternalLogReuse != labelSuppressSameTimestampInternalLogReuse)
                     {
                         throw new IllegalImportException("同一ラベルIDに異なる情報が設定されています。");
                     }
@@ -3819,7 +3854,14 @@ public sealed class HappyTriggerWindow : Window
         return string.Equals(header, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionX", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionY", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(header, "TriggerLabelLineSpacing", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(header, "TriggerLabelLineSpacing", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(header, "TriggerLabelSuppressSameTimestampInternalLogReuse", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ParseOptionalBool(IReadOnlyDictionary<string, string> row, string key, bool defaultValue)
+    {
+        var value = Get(row, key);
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : ParseBool(value);
     }
 
     private static float ParseOptionalFloat(IReadOnlyDictionary<string, string> row, string key, float defaultValue)

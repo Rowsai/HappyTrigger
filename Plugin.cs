@@ -2345,20 +2345,20 @@ public sealed class Plugin : IDalamudPlugin
     {
         var displayText = popup.Trigger.DisplayText ?? string.Empty;
         var statusName = popup.StatusRemainingStatusName ?? string.Empty;
-        var suffix = $"{statusName}（{remainingText}s）";
 
         if (string.IsNullOrWhiteSpace(displayText))
         {
-            return suffix;
+            return string.IsNullOrWhiteSpace(statusName)
+                ? $"（{remainingText}s）"
+                : $"{statusName}（{remainingText}s）";
         }
 
-        if (!string.IsNullOrWhiteSpace(statusName) &&
-            displayText.Contains(statusName, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{displayText}（{remainingText}s）";
-        }
-
-        return $"{displayText} {suffix}";
+        // 表示対象テキストが設定されている場合は、設定したテキストをそのまま優先します。
+        // 以前は表示テキスト内にステータス名が含まれていない場合、
+        // 「表示テキスト ステータス名（秒数）」の形でステータス名を自動付与していました。
+        // そのため「タケノコ（偽つなみ）」のような任意テキストに対して、
+        // 設定していない「混沌の水」が表示されてしまっていました。
+        return $"{displayText}（{remainingText}s）";
     }
 
     private static void DrawDecoratedText(

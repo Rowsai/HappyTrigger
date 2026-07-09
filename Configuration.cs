@@ -105,4 +105,9 @@ public sealed class TriggerLabelSetting
     // true の場合、このラベル配下では同じステータス名の残り時間表示を複数同時に許可します。
     // 例: 「呪詛の叫び声（見る）」と「呪詛の叫び声（見ない）」を別ラベルで同時表示したい場合に使用します。
     public bool AllowDuplicateStatusRemainingDisplay { get; set; } = false;
+
+    // true の場合、同一ステータス複数表示の例外設定内で、同一タイムスタンプの内部ログを
+    // 別トリガーの組み合わせ材料として再利用しないようにします。
+    // デフォルトは false で、既存の消費済みログ判定を維持します。
+    public bool SuppressSameTimestampInternalLogReuse { get; set; } = false;
 }
