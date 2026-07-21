@@ -21,6 +21,7 @@ using Dalamud.Plugin.Services;
 using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaStatus = Lumina.Excel.Sheets.Status;
 using LuminaContentFinderCondition = Lumina.Excel.Sheets.ContentFinderCondition;
+using FFXIVBattleChara = FFXIVClientStructs.FFXIV.Client.Game.Character.BattleChara;
 
 namespace HappyTrigger;
 
@@ -1882,6 +1883,9 @@ public sealed class Plugin : IDalamudPlugin
                 var actionId = battleChara.CastActionId;
                 var actionName = GetActionName(actionId);
                 var totalCast = battleChara.TotalCastTime;
+                var targetPosition = TryGetCastTargetPosition(battleChara, out var position)
+                    ? position
+                    : (Vector3?)null;
                 var statuses = battleChara.StatusList;
                 var hasStatus = false;
 
@@ -1906,7 +1910,8 @@ public sealed class Plugin : IDalamudPlugin
                             actionName,
                             totalCast,
                             status.StatusId.ToString(),
-                            status.Param.ToString());
+                            status.Param.ToString(),
+                            targetPosition);
                     }
                 }
 
@@ -1923,7 +1928,8 @@ public sealed class Plugin : IDalamudPlugin
                             actionName,
                             totalCast,
                             "-",
-                            "-");
+                            "-",
+                            targetPosition);
                     }
                 }
             }
@@ -1942,9 +1948,43 @@ public sealed class Plugin : IDalamudPlugin
         string actionName,
         float castTotal,
         string statusId,
-        string param)
+        string param,
+        Vector3? targetPosition)
     {
-        this.AddInternalLog($"EnemyCasting Infonmation. Enemy={enemyName} ActionId={actionId} ActionName={actionName} CastTotal={castTotal:0.00}s StatusId={statusId} Param={param}");
+        var positionText = targetPosition is { } position
+            ? $" Position x={position.X:0.00} y={position.Y:0.00} z={position.Z:0.00}"
+            : " Position=-";
+
+        this.AddInternalLog($"EnemyCasting Infonmation. Enemy={enemyName} ActionId={actionId} ActionName={actionName} CastTotal={castTotal:0.00}s StatusId={statusId} Param={param}{positionText}");
+    }
+
+    private static unsafe bool TryGetCastTargetPosition(IBattleChara battleChara, out Vector3 targetPosition)
+    {
+        targetPosition = default;
+
+        var chara = (FFXIVBattleChara*)battleChara.Address.ToPointer();
+        if (chara == null)
+        {
+            return false;
+        }
+
+        var castInfo = chara->GetCastInfo();
+        if (castInfo == null)
+        {
+            return false;
+        }
+
+        var position = castInfo->TargetLocation;
+        if (!float.IsFinite(position.X) ||
+            !float.IsFinite(position.Y) ||
+            !float.IsFinite(position.Z) ||
+            (position.X == 0f && position.Y == 0f && position.Z == 0f))
+        {
+            return false;
+        }
+
+        targetPosition = new Vector3(position.X, position.Y, position.Z);
+        return true;
     }
 
     private static string GetActionName(uint actionId)
