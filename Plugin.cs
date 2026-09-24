@@ -57,6 +57,12 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
+    [PluginService]
+    internal static IFramework Framework { get; private set; } = null!;
+    [PluginService]
+    internal static IPartyList PartyList { get; private set; } = null!;
+    private readonly TriggerActionService triggerActions;
+
     private readonly WindowSystem windowSystem = new("HappyTrigger");
     private readonly Configuration configuration;
     private readonly ImageCacheService imageCacheService;
@@ -122,6 +128,7 @@ public sealed class Plugin : IDalamudPlugin
             this.SaveConfig();
         }
 
+        this.triggerActions = new TriggerActionService(message => this.AddInternalLog(message, false));
         this.imageCacheService = new ImageCacheService(TextureProvider);
         this.textTextureCacheService = new TextTextureCacheService(TextureProvider);
         this.voiceVoxSpeechService = new VoiceVoxSpeechService(message => this.AddInternalLog(message, false));
@@ -143,7 +150,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(this.OnCommand)
         {
-            HelpMessage = "Open HappyTrigger config window.",
+            HelpMessage = "HappyTriggerの設定画面を開きます。",
         });
 
         PluginInterface.UiBuilder.Draw += this.Draw;
@@ -276,6 +283,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         var text = chatMessage.Message.TextValue;
         var sender = chatMessage.Sender.TextValue;
+        if (this.triggerActions.IsOwnOutput(text, sender)) return;
         var chatType = "Chat";
 
         var logText = string.IsNullOrWhiteSpace(sender)
@@ -297,6 +305,7 @@ public sealed class Plugin : IDalamudPlugin
             if (trigger.IsMatch(text))
             {
                 this.AddInternalLog($"Image trigger matched. Keyword='{trigger.Keyword}', Message='{text}'");
+                this.triggerActions.Enqueue(trigger);
                 this.ActivatePopup(trigger);
             }
         }
@@ -313,6 +322,7 @@ public sealed class Plugin : IDalamudPlugin
             if (trigger.IsMatch(text))
             {
                 this.AddInternalLog($"Text trigger matched. Keyword='{trigger.Keyword}', Text='{trigger.DisplayText}'");
+                this.triggerActions.Enqueue(trigger);
                 this.ActivatePopup(trigger);
             }
         }
@@ -1077,6 +1087,7 @@ public sealed class Plugin : IDalamudPlugin
         this.AddInternalLog(
             $"FFXIV Log trigger matched. Id={trigger.TriggerId} Source={source} Prerequisite={(trigger.UsePrerequisite ? "ON" : "OFF")} PrerequisiteId='{trigger.PrerequisiteTriggerId}' BattleLog='{trigger.BattleLogKeyword}' InternalLogs='{string.Join(" / ", trigger.GetInternalLogKeywords())}' StatusRemaining={(trigger.EnableStatusRemainingAppend ? $"ON:{trigger.StatusRemainingJob}/{trigger.StatusRemainingStatusName} AllowDuplicate={(this.IsDuplicateStatusRemainingDisplayAllowed(trigger) ? "ON" : "OFF")}" : "OFF")}",
             false);
+        this.triggerActions.Enqueue(trigger);
         this.ActivatePopup(trigger, false, statusRemainingSnapshot);
     }
 
@@ -2706,6 +2717,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         ChatGui.ChatMessage -= this.OnChatMessage;
+        this.triggerActions.Dispose();
 
         PluginInterface.UiBuilder.Draw -= this.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= this.OpenConfigUi;

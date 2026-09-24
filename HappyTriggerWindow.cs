@@ -12,7 +12,7 @@ using LuminaTerritoryType = Lumina.Excel.Sheets.TerritoryType;
 
 namespace HappyTrigger;
 
-public sealed class HappyTriggerWindow : Window
+public sealed partial class HappyTriggerWindow : Window
 {
     private enum TriggerListKind
     {
@@ -62,7 +62,7 @@ public sealed class HappyTriggerWindow : Window
     private const string LabelLocationSettingPopupName = "トリガーラベル発火場所条件設定###HappyTriggerLabelLocationSettingPopup";
     private const string BoxLocationSettingPopupName = "トリガーボックス発火場所条件設定###HappyTriggerBoxLocationSettingPopup";
 
-    private const int StyleColorCount = 12;
+    private const int StyleColorCount = 28;
     private const int MaxVisibleLogRows = 30;
 
     private static readonly VoiceVoxSpeakerOption[] VoiceVoxSpeakerOptions =
@@ -176,7 +176,7 @@ public sealed class HappyTriggerWindow : Window
         Func<IReadOnlyList<FfxivLogEntry>> getBattleLogs,
         Func<IReadOnlyList<FfxivLogEntry>> getInternalLogs,
         Action clearFfxivLogs)
-        : base("HappyTrigger###HappyTriggerConfigWindow")
+        : base("HappyTrigger  v1.0.0.0  |  正式版###HappyTriggerConfigWindow")
     {
         this.configuration = configuration;
         this.saveConfig = saveConfig;
@@ -198,23 +198,47 @@ public sealed class HappyTriggerWindow : Window
 
     public override void PreDraw()
     {
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.02f, 0.10f, 0.04f, 0.96f));
-        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.00f, 0.35f, 0.12f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.00f, 0.65f, 0.24f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TitleBgCollapsed, new Vector4(0.00f, 0.25f, 0.10f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.Tab, new Vector4(0.00f, 0.45f, 0.16f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TabHovered, new Vector4(0.00f, 0.78f, 0.28f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TabActive, new Vector4(0.00f, 0.62f, 0.22f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TabUnfocused, new Vector4(0.00f, 0.32f, 0.12f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.TabUnfocusedActive, new Vector4(0.00f, 0.48f, 0.17f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.00f, 0.45f, 0.16f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.00f, 0.62f, 0.22f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.00f, 0.78f, 0.28f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.06f, 0.08f, 0.99f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.06f, 0.07f, 0.10f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.09f, 0.14f, 0.21f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgCollapsed, new Vector4(0.06f, 0.07f, 0.10f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Tab, new Vector4(0.08f, 0.10f, 0.15f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TabHovered, new Vector4(0.12f, 0.35f, 0.43f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TabActive, new Vector4(0.10f, 0.28f, 0.35f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TabUnfocused, new Vector4(0.07f, 0.08f, 0.12f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TabUnfocusedActive, new Vector4(0.09f, 0.20f, 0.27f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.10f, 0.23f, 0.30f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.12f, 0.32f, 0.40f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.14f, 0.39f, 0.47f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.10f, 0.25f, 0.32f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.12f, 0.37f, 0.45f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.10f, 0.45f, 0.52f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.07f, 0.10f, 0.14f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, new Vector4(0.10f, 0.17f, 0.23f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBgActive, new Vector4(0.11f, 0.23f, 0.30f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.19f, 0.25f, 0.33f, 0.70f));
+        ImGui.PushStyleColor(ImGuiCol.CheckMark, new Vector4(0.25f, 0.85f, 0.79f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.25f, 0.78f, 0.75f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, new Vector4(0.40f, 0.95f, 0.87f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.90f, 0.93f, 0.98f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TextDisabled, new Vector4(0.52f, 0.60f, 0.70f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Separator, new Vector4(0.17f, 0.23f, 0.31f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.PopupBg, new Vector4(0.06f, 0.08f, 0.12f, 0.99f));
+        ImGui.PushStyleColor(ImGuiCol.TableHeaderBg, new Vector4(0.09f, 0.14f, 0.20f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TableRowBgAlt, new Vector4(0.13f, 0.18f, 0.25f, 0.25f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 10.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 7.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.TabRounding, 5.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(18, 14));
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(10, 6));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(10, 9));
     }
 
     public override void PostDraw()
     {
         ImGui.PopStyleColor(StyleColorCount);
+        ImGui.PopStyleVar(7);
     }
 
     public override void Draw()
@@ -264,204 +288,19 @@ public sealed class HappyTriggerWindow : Window
 
     private void DrawHeader()
     {
-        var drawList = ImGui.GetWindowDrawList();
-        var pos = ImGui.GetCursorScreenPos();
-        var width = ImGui.GetContentRegionAvail().X;
-        // const float height = 36.0f;
-        var color = ImGui.GetColorU32(new Vector4(0.0f, 0.65f, 0.24f, 1.0f));
-
-        // drawList.AddRectFilled(pos, new Vector2(pos.X + width, pos.Y + height), color);
-
-        // ImGui.SetCursorScreenPos(new Vector2(pos.X + 8.0f, pos.Y + 7.0f));
-        // ImGui.Text("HappyTrigger");
-        // ImGui.SetCursorScreenPos(new Vector2(pos.X, pos.Y + height + 8.0f));
-    }
-
-    private void DrawTriggerEditTab()
-    {
-        ImGui.Spacing();
-        ImGui.Text("基本設定");
-        ImGui.Spacing();
-        ImGui.Text("チャットログに表示される文言を設定してください。");
-        ImGui.Spacing();
-
-        var enabled = this.editTrigger.Enabled;
-        if (ImGui.Checkbox("有効", ref enabled))
-        {
-            this.editTrigger.Enabled = enabled;
-        }
-
-        var exactMatch = this.editTrigger.ExactMatch;
-        if (ImGui.Checkbox("完全一致", ref exactMatch))
-        {
-            this.editTrigger.ExactMatch = exactMatch;
-        }
-
+        ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), "HAPPY TRIGGER");
         ImGui.SameLine();
-        ImGui.TextDisabled("OFFの場合は部分一致で判定します。");
-
-        var useFfxivLogReference = this.editTrigger.UseFfxivLogReference;
-        if (ImGui.Checkbox("FFXIV Logを参照", ref useFfxivLogReference))
-        {
-            this.editTrigger.UseFfxivLogReference = useFfxivLogReference;
-        }
-
-        if (this.editTrigger.UseFfxivLogReference)
-        {
-            this.DrawFfxivLogReferenceSettingArea();
-        }
-        else
-        {
-            var keyword = this.editTrigger.Keyword ?? string.Empty;
-            ImGui.SetNextItemWidth(700.0f);
-            if (InputTextJapanese("トリガー文字", ref keyword, 512))
-            {
-                this.editTrigger.Keyword = keyword;
-            }
-        }
-
-        var triggerIdText = string.IsNullOrWhiteSpace(this.editTrigger.TriggerId)
-            ? "ID: 未採番（保存時に自動採番）"
-            : $"ID: {this.editTrigger.TriggerId}";
-        ImGui.TextDisabled(triggerIdText);
-
-        var triggerName = RemoveLineBreaks(this.editTrigger.TriggerName ?? string.Empty);
-        ImGui.SetNextItemWidth(420.0f);
-        if (InputTextJapanese("トリガー名", ref triggerName, 256))
-        {
-            this.editTrigger.TriggerName = RemoveLineBreaks(triggerName);
-        }
-        ImGui.SameLine();
-        ImGui.TextDisabled("空欄の場合は『名称未設定』として表示します。名称は重複しても問題ありません。");
-
+        ImGui.TextDisabled("ログから、次のアクションへ。");
+        var triggers = this.GetAllTriggers();
+        ImGui.TextDisabled($"登録 {triggers.Count} 件   /   有効 {triggers.Count(t => t.Enabled)} 件   /   ボックス {this.configuration.TriggerBoxes.Count} 件");
+        ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("詳細設定");
-
-        var x = this.editTrigger.PositionX;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("画面位置 X", ref x, 1.0f, 10.0f))
-        {
-            this.editTrigger.PositionX = x;
-        }
-
-        var y = this.editTrigger.PositionY;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("画面位置 Y", ref y, 1.0f, 10.0f))
-        {
-            this.editTrigger.PositionY = y;
-        }
-
-        var waitSeconds = this.editTrigger.WaitSeconds;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("待機時間", ref waitSeconds, 0.1f, 1.0f))
-        {
-            this.editTrigger.WaitSeconds = Math.Clamp(waitSeconds, 0.0f, 600.0f);
-        }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled("トリガー文字を検知してから表示するまでの秒数です。0秒なら即時表示します。");
-
-        ImGui.Spacing();
-        ImGui.Text("管理設定");
-        this.DrawTriggerManagementAssignmentArea();
-
-        ImGui.Spacing();
-        ImGui.Text("表示項目設定");
-
-        var displayMode = this.editTrigger.DisplayTextMode ? 1 : 0;
-        if (ImGui.RadioButton("トリガーで画像を表示", displayMode == 0))
-        {
-            displayMode = 0;
-            this.editTrigger.DisplayTextMode = false;
-        }
-
-        if (ImGui.RadioButton("トリガーでテキストを表示", displayMode == 1))
-        {
-            displayMode = 1;
-            this.editTrigger.DisplayTextMode = true;
-        }
-
-        ImGui.Spacing();
-
-        if (displayMode == 1)
-        {
-            this.DrawTextSettingArea();
-        }
-        else
-        {
-            this.DrawImageSettingArea();
-        }
-
-        ImGui.Spacing();
-        ImGui.Spacing();
-
-        if (ImGui.Button("テスト", new Vector2(180.0f, 40.0f)))
-        {
-            this.testTrigger(this.editTrigger);
-        }
-
-        ImGui.SameLine();
-
-        var positionButtonLabel = this.editTrigger.DisplayTextMode
-            ? "テキスト表示位置をマウスで設定"
-            : "画像表示位置をマウスで設定";
-
-        if (ImGui.Button(positionButtonLabel, new Vector2(300.0f, 40.0f)))
-        {
-            this.positionSettingTrigger(this.editTrigger);
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.Button("保存", new Vector2(180.0f, 40.0f)))
-        {
-            this.SaveEditingTrigger();
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.Button("新規入力に戻す", new Vector2(180.0f, 40.0f)))
-        {
-            this.ResetEditing();
-        }
-
-        if (this.editingIndex >= 0)
-        {
-            ImGui.SameLine();
-            var listName = this.editingKind switch
-            {
-                TriggerListKind.FfxivLog => "FFXIV Log参照用",
-                TriggerListKind.Text => "テキスト表示用",
-                _ => "画像表示用",
-            };
-            ImGui.TextColored(new Vector4(1.0f, 0.9f, 0.3f, 1.0f), $"編集中: {listName} {this.editingIndex + 1}");
-        }
     }
 
     private void DrawFfxivLogReferenceSettingArea()
     {
-        var usePrerequisite = this.editTrigger.UsePrerequisite;
-        if (ImGui.Checkbox("前提条件を使用する", ref usePrerequisite))
-        {
-            this.editTrigger.UsePrerequisite = usePrerequisite;
-        }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled("ONの場合、指定した前提条件トリガーが表示時間中の間にログ条件が揃った場合だけ発火します。");
-
-        if (this.editTrigger.UsePrerequisite)
-        {
-            this.DrawPrerequisiteTriggerCombo();
-        }
-        else
-        {
-            this.editTrigger.PrerequisiteTriggerId = string.Empty;
-        }
-
-        this.DrawLocationRestrictionSettingArea();
-
         var battleLogKeyword = RemoveLineBreaks(this.editTrigger.BattleLogKeyword ?? string.Empty);
-        ImGui.SetNextItemWidth(700.0f);
+        SetEditorFieldWidth(700);
         if (InputTextJapanese("バトルログ", ref battleLogKeyword, 2048))
         {
             this.editTrigger.BattleLogKeyword = RemoveLineBreaks(battleLogKeyword);
@@ -472,7 +311,7 @@ public sealed class HappyTriggerWindow : Window
         for (var i = 0; i < internalLogKeywords.Count; i++)
         {
             var internalLogKeyword = RemoveLineBreaks(internalLogKeywords[i] ?? string.Empty);
-            ImGui.SetNextItemWidth(1300.0f);
+            SetEditorFieldWidth(1300);
             if (InputTextJapanese($"内部ログ {i + 1}", ref internalLogKeyword, 2048))
             {
                 internalLogKeywords[i] = RemoveLineBreaks(internalLogKeyword);
@@ -481,8 +320,7 @@ public sealed class HappyTriggerWindow : Window
 
             if (internalLogKeywords.Count > 1)
             {
-                ImGui.SameLine();
-                if (ImGui.SmallButton($"削除##internal_log_keyword_delete_{i}"))
+                        if (ImGui.SmallButton($"削除##internal_log_keyword_delete_{i}"))
                 {
                     internalLogKeywords.RemoveAt(i);
                     this.SetEditingInternalLogKeywords(internalLogKeywords);
@@ -497,6 +335,33 @@ public sealed class HappyTriggerWindow : Window
             this.SetEditingInternalLogKeywords(internalLogKeywords);
         }
 
+        ImGui.TextWrapped("バトルログだけ、内部ログだけでも設定できます。複数入力した場合は、すべての条件が揃うと実行します。");
+        if (ImGui.CollapsingHeader("実行を絞り込む（場所・前提トリガー）"))
+        {
+        var usePrerequisite = this.editTrigger.UsePrerequisite;
+        if (ImGui.Checkbox("前提条件を使用する", ref usePrerequisite))
+        {
+            this.editTrigger.UsePrerequisite = usePrerequisite;
+        }
+
+        ImGui.TextWrapped("ONの場合、指定した前提条件トリガーが表示時間中の間にログ条件が揃った場合だけ発火します。");
+
+        if (this.editTrigger.UsePrerequisite)
+        {
+            this.DrawPrerequisiteTriggerCombo();
+        }
+        else
+        {
+            this.editTrigger.PrerequisiteTriggerId = string.Empty;
+        }
+
+        this.DrawLocationRestrictionSettingArea();
+
+        }
+    }
+
+    private void DrawStatusTimerSettings()
+    {
         ImGui.Spacing();
         var enableStatusRemainingAppend = this.editTrigger.EnableStatusRemainingAppend;
         if (ImGui.Checkbox("ステータスの残り時間を取得する", ref enableStatusRemainingAppend))
@@ -504,25 +369,23 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.EnableStatusRemainingAppend = enableStatusRemainingAppend;
         }
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("ONの場合、指定したジョブ/ステータス名の残り時間を表示テキスト末尾に付与します。");
+        ImGui.TextWrapped("ONの場合、指定したジョブ/ステータス名の残り時間を表示テキスト末尾に付与します。");
 
         if (this.editTrigger.EnableStatusRemainingAppend)
         {
             var statusJob = RemoveLineBreaks(this.editTrigger.StatusRemainingJob ?? string.Empty);
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (InputTextJapanese("ジョブ", ref statusJob, 64))
             {
                 this.editTrigger.StatusRemainingJob = RemoveLineBreaks(statusJob).Trim();
             }
 
-            ImGui.SameLine();
-            ImGui.TextDisabled("例: PLD / 複数指定: <PLD|DRK|WAR> / 全ジョブ: ALL");
-            ImGui.TextDisabled("Tips: 複数ジョブを対象にする場合は <PLD|DRK|WAR> のように | 区切りで指定します。");
-            ImGui.TextDisabled("Tips: ジョブを問わずPTメンバーの誰でも対象にする場合は ALL を指定します。");
+                ImGui.TextWrapped("例: PLD / 複数指定: <PLD|DRK|WAR> / 全ジョブ: ALL");
+            ImGui.TextWrapped("Tips: 複数ジョブを対象にする場合は <PLD|DRK|WAR> のように | 区切りで指定します。");
+            ImGui.TextWrapped("Tips: ジョブを問わずPTメンバーの誰でも対象にする場合は ALL を指定します。");
 
             var statusName = RemoveLineBreaks(this.editTrigger.StatusRemainingStatusName ?? string.Empty);
-            ImGui.SetNextItemWidth(360.0f);
+            SetEditorFieldWidth(360);
             if (InputTextJapanese("ステータス名", ref statusName, 256))
             {
                 this.editTrigger.StatusRemainingStatusName = RemoveLineBreaks(statusName).Trim();
@@ -533,17 +396,13 @@ public sealed class HappyTriggerWindow : Window
             {
                 this.editTrigger.AllowDuplicateStatusRemainingDisplay = allowDuplicateStatusRemainingDisplay;
             }
-            ImGui.SameLine();
-            ImGui.TextDisabled("ONの場合、同じステータス名が表示中でも別メンバー分として追加表示します。job=ALL向けです。");
+                ImGui.TextWrapped("ONの場合、同じステータス名が表示中でも別メンバー分として追加表示します。job=ALL向けです。");
 
-            ImGui.TextDisabled("例: job=PLD StatusName=水属性圧縮 のログがある場合、表示テキスト末尾に 水属性圧縮（75.99s） のように表示し、表示開始後にカウントダウンします。");
-            ImGui.TextDisabled("例: ジョブ=<PLD|DRK|WAR> の場合、PLD/DRK/WAR のいずれかの MemberStatus ログでマッチします。");
-            ImGui.TextDisabled("例: ジョブ=ALL の場合、job=PLD / job=DRK など実ログ側のjobを無視してマッチします。");
+            ImGui.TextWrapped("例: job=PLD StatusName=水属性圧縮 のログがある場合、表示テキスト末尾に 水属性圧縮（75.99s） のように表示し、表示開始後にカウントダウンします。");
+            ImGui.TextWrapped("例: ジョブ=<PLD|DRK|WAR> の場合、PLD/DRK/WAR のいずれかの MemberStatus ログでマッチします。");
+            ImGui.TextWrapped("例: ジョブ=ALL の場合、job=PLD / job=DRK など実ログ側のjobを無視してマッチします。");
         }
 
-        ImGui.TextDisabled("保存時は 内部ログ1_@_内部ログ2_@_内部ログn の形式で保持します。編集時は _@_ で分割して各入力欄に戻します。");
-        ImGui.TextDisabled("全角で ＿＠＿ と保存済みの場合も同じ区切り文字として扱います。入力欄内の改行は自動で除去します。");
-        ImGui.TextDisabled("バトルログのみ、内部ログのみでも動作します。バトルログと内部ログを両方設定した場合は、すべての条件が揃った場合に発火します。");
     }
 
     private void DrawLocationRestrictionSettingArea()
@@ -560,7 +419,7 @@ public sealed class HappyTriggerWindow : Window
             "コンテンツ指定",
         };
 
-        ImGui.SetNextItemWidth(220.0f);
+        SetEditorFieldWidth(220);
         if (ImGui.Combo("場所条件", ref mode, modeLabels, modeLabels.Length))
         {
             this.editTrigger.LocationRestrictionType = (TriggerLocationRestrictionType)mode;
@@ -579,12 +438,11 @@ public sealed class HappyTriggerWindow : Window
             }
         }
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("指定したエリア / コンテンツにいる場合だけ、このログトリガーを発火します。");
+        ImGui.TextWrapped("指定したエリア / コンテンツにいる場合だけ、このログトリガーを発火します。");
 
         if (this.editTrigger.LocationRestrictionType == TriggerLocationRestrictionType.None)
         {
-            ImGui.TextDisabled("現在は場所を問わず発火します。");
+            ImGui.TextWrapped("現在は場所を問わず発火します。");
             return;
         }
 
@@ -648,7 +506,7 @@ public sealed class HappyTriggerWindow : Window
     {
         if (territoryTypeId == 0)
         {
-            ImGui.TextDisabled(emptyText);
+            ImGui.TextWrapped(emptyText);
             return;
         }
 
@@ -664,7 +522,7 @@ public sealed class HappyTriggerWindow : Window
         IReadOnlyList<LocationSelectOption> allOptions,
         Action<LocationSelectOption> onSelected)
     {
-        ImGui.SetNextItemWidth(420.0f);
+        SetEditorFieldWidth(420);
         InputTextJapanese(filterLabel, ref filterText, 256);
 
         var normalizedFilter = NormalizeSearchText(filterText);
@@ -673,12 +531,12 @@ public sealed class HappyTriggerWindow : Window
             .Take(80)
             .ToList();
 
-        ImGui.SetNextItemWidth(700.0f);
+        SetEditorFieldWidth(700);
         if (ImGui.BeginListBox($"{listLabel}##{filterLabel}", new Vector2(700.0f, 180.0f)))
         {
             if (filteredOptions.Count == 0)
             {
-                ImGui.TextDisabled("候補がありません。検索文字を減らしてください。");
+                ImGui.TextWrapped("候補がありません。検索文字を減らしてください。");
             }
 
             foreach (var option in filteredOptions)
@@ -706,7 +564,7 @@ public sealed class HappyTriggerWindow : Window
 
         if (filteredOptions.Count >= 80)
         {
-            ImGui.TextDisabled("候補が多いため80件まで表示しています。検索文字を追加すると絞り込めます。");
+            ImGui.TextWrapped("候補が多いため80件まで表示しています。検索文字を追加すると絞り込めます。");
         }
     }
 
@@ -910,7 +768,7 @@ public sealed class HappyTriggerWindow : Window
         if (availableTriggerIds.Count == 0)
         {
             this.editTrigger.PrerequisiteTriggerId = string.Empty;
-            ImGui.TextDisabled("前提条件に指定できる保存済みトリガーIDがありません。");
+            ImGui.TextWrapped("前提条件に指定できる保存済みトリガーIDがありません。");
             return;
         }
 
@@ -920,7 +778,7 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.PrerequisiteTriggerId = selectedId;
         }
 
-        ImGui.SetNextItemWidth(220.0f);
+        SetEditorFieldWidth(220);
         if (ImGui.BeginCombo("前提条件トリガー", selectedId))
         {
             foreach (var triggerId in availableTriggerIds)
@@ -941,8 +799,7 @@ public sealed class HappyTriggerWindow : Window
             ImGui.EndCombo();
         }
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("選択したIDの表示時間中だけ、このFFXIV Log参照トリガーを判定します。");
+        ImGui.TextWrapped("選択したIDの表示時間中だけ、このFFXIV Log参照トリガーを判定します。");
     }
 
     private List<string> GetAvailablePrerequisiteTriggerIds()
@@ -991,12 +848,12 @@ public sealed class HappyTriggerWindow : Window
             .ToList();
     }
 
-    private void DrawTextSettingArea()
+    private void DrawTextContentSettings()
     {
-        ImGui.Text("テキスト項目設定 ※トリガーでテキストを表示を選択した場合");
+        ImGui.TextWrapped("画面に表示するメッセージを入力します。例：北へ移動してください");
 
         var displayText = this.editTrigger.DisplayText ?? string.Empty;
-        ImGui.SetNextItemWidth(700.0f);
+        SetEditorFieldWidth(700);
         if (InputTextJapanese("表示対象テキスト", ref displayText, 1024))
         {
             this.editTrigger.DisplayText = displayText;
@@ -1009,22 +866,20 @@ public sealed class HappyTriggerWindow : Window
             this.editTrigger.EnableVoiceVox = enableVoiceVox;
         }
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("ONの場合、表示対象テキストをVOICEVOX Engineで読み上げます。");
+        ImGui.TextWrapped("ONの場合、表示対象テキストをVOICEVOX Engineで読み上げます。");
 
         if (this.editTrigger.EnableVoiceVox)
         {
             var endpoint = string.IsNullOrWhiteSpace(this.editTrigger.VoiceVoxEndpoint)
                 ? "http://127.0.0.1:50021"
                 : this.editTrigger.VoiceVoxEndpoint;
-            ImGui.SetNextItemWidth(360.0f);
+            SetEditorFieldWidth(360);
             if (InputTextJapanese("VOICEVOX URL", ref endpoint, 512))
             {
                 this.editTrigger.VoiceVoxEndpoint = endpoint.Trim();
             }
 
-            ImGui.SameLine();
-            ImGui.TextDisabled("例: http://127.0.0.1:50021");
+                ImGui.TextWrapped("例: http://127.0.0.1:50021");
 
             var speakerId = this.editTrigger.VoiceVoxSpeakerId;
             var speakerLabels = VoiceVoxSpeakerOptions.Select(option => option.Label).ToArray();
@@ -1033,7 +888,7 @@ public sealed class HappyTriggerWindow : Window
                 ? VoiceVoxSpeakerOptions[selectedSpeakerIndex].Label
                 : $"カスタム / 未登録 Speaker ID ({speakerId})";
 
-            ImGui.SetNextItemWidth(360.0f);
+            SetEditorFieldWidth(360);
             if (ImGui.BeginCombo("話者", speakerComboPreview))
             {
                 for (var i = 0; i < VoiceVoxSpeakerOptions.Length; i++)
@@ -1054,19 +909,22 @@ public sealed class HappyTriggerWindow : Window
             }
 
             speakerId = this.editTrigger.VoiceVoxSpeakerId;
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (ImGui.InputInt("Speaker ID", ref speakerId))
             {
                 this.editTrigger.VoiceVoxSpeakerId = Math.Max(0, speakerId);
             }
 
-            ImGui.SameLine();
-            ImGui.TextDisabled("一覧にない話者/スタイルはSpeaker IDを直接入力してください。");
+                ImGui.TextWrapped("一覧にない話者/スタイルはSpeaker IDを直接入力してください。");
         }
 
+    }
+
+    private void DrawTextAppearanceSettings()
+    {
         ImGui.Spacing();
         var textSize = this.editTrigger.TextSize;
-        ImGui.SetNextItemWidth(180.0f);
+        SetEditorFieldWidth(180);
         if (ImGui.InputFloat("テキストサイズ", ref textSize, 1.0f, 10.0f))
         {
             this.editTrigger.TextSize = Math.Clamp(textSize, 8.0f, 256.0f);
@@ -1074,27 +932,27 @@ public sealed class HappyTriggerWindow : Window
 
         var fontDesign = (int)this.editTrigger.TextFontDesign;
         var fontDesignLabels = new[] { "標準", "太字", "影付き", "黒縁強調", "ネオン風" };
-        ImGui.SetNextItemWidth(220.0f);
+        SetEditorFieldWidth(220);
         if (ImGui.Combo("フォントデザイン", ref fontDesign, fontDesignLabels, fontDesignLabels.Length))
         {
             this.editTrigger.TextFontDesign = (TextFontDesign)Math.Clamp(fontDesign, 0, fontDesignLabels.Length - 1);
         }
 
+        if (ImGui.CollapsingHeader("フォント・描画品質の詳細"))
+        {
         var enablePixelSnap = this.editTrigger.EnableTextPixelSnap;
         if (ImGui.Checkbox("文字をきれいに表示する", ref enablePixelSnap))
         {
             this.editTrigger.EnableTextPixelSnap = enablePixelSnap;
         }
-        ImGui.SameLine();
-        ImGui.TextDisabled("ONの場合、描画位置を整数座標に丸めて文字のにじみを抑えます。");
+        ImGui.TextWrapped("ONの場合、描画位置を整数座標に丸めて文字のにじみを抑えます。");
 
         var enableSharpRendering = this.editTrigger.EnableTextSharpRendering;
         if (ImGui.Checkbox("大きい文字をくっきり表示する", ref enableSharpRendering))
         {
             this.editTrigger.EnableTextSharpRendering = enableSharpRendering;
         }
-        ImGui.SameLine();
-        ImGui.TextDisabled("ON推奨。Windowsの文字描画でテクスチャ化し、大きい文字でも拡大ボケを抑えます。");
+        ImGui.TextWrapped("ON推奨。Windowsの文字描画でテクスチャ化し、大きい文字でも拡大ボケを抑えます。");
 
         if (this.editTrigger.EnableTextSharpRendering)
         {
@@ -1118,24 +976,22 @@ public sealed class HappyTriggerWindow : Window
                 fontFamilyIndex = 0;
             }
 
-            ImGui.SetNextItemWidth(240.0f);
+            SetEditorFieldWidth(240);
             if (ImGui.Combo("くっきり表示フォント", ref fontFamilyIndex, fontFamilyLabels, fontFamilyLabels.Length))
             {
                 this.editTrigger.TextFontFamilyName = fontFamilyLabels[Math.Clamp(fontFamilyIndex, 0, fontFamilyLabels.Length - 1)];
             }
 
-            ImGui.SameLine();
-            ImGui.TextDisabled("Noto Sans JP等をWindowsにインストール済みなら指定できます。");
+                ImGui.TextWrapped("Noto Sans JP等をWindowsにインストール済みなら指定できます。");
 
             var customFontPath = this.editTrigger.CustomTextFontPath ?? string.Empty;
-            ImGui.SetNextItemWidth(700.0f);
+            SetEditorFieldWidth(700);
             if (InputTextJapanese("カスタムフォントファイル", ref customFontPath, 2048))
             {
                 this.editTrigger.CustomTextFontPath = customFontPath;
             }
 
-            ImGui.SameLine();
-            if (ImGui.Button("フォントを選択"))
+                if (ImGui.Button("フォントを選択"))
             {
                 if (NativeFileDialogService.TryOpenFontFile(out var selectedFontPath))
                 {
@@ -1143,21 +999,23 @@ public sealed class HappyTriggerWindow : Window
                 }
             }
 
-            ImGui.TextDisabled("Tips: .ttf / .otf を指定できます。空欄の場合は上のフォント名を使用します。おすすめは Noto Sans JP / BIZ UDPGothic / Meiryo です。");
-            ImGui.TextDisabled("秒数表示つきテキストは、表示幅を固定し、読み込み中は直前のテクスチャを維持してブレを抑えます。");
+            ImGui.TextWrapped("Tips: .ttf / .otf を指定できます。空欄の場合は上のフォント名を使用します。おすすめは Noto Sans JP / BIZ UDPGothic / Meiryo です。");
+            ImGui.TextWrapped("秒数表示つきテキストは、表示幅を固定し、読み込み中は直前のテクスチャを維持してブレを抑えます。");
+        }
+
         }
 
         if (this.editTrigger.TextFontDesign == TextFontDesign.Shadow || this.editTrigger.TextFontDesign == TextFontDesign.Neon)
         {
             var shadowOffsetX = this.editTrigger.TextShadowOffsetX;
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (ImGui.InputFloat("影の位置 X", ref shadowOffsetX, 0.5f, 1.0f))
             {
                 this.editTrigger.TextShadowOffsetX = Math.Clamp(shadowOffsetX, -32.0f, 32.0f);
             }
 
             var shadowOffsetY = this.editTrigger.TextShadowOffsetY;
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (ImGui.InputFloat("影の位置 Y", ref shadowOffsetY, 0.5f, 1.0f))
             {
                 this.editTrigger.TextShadowOffsetY = Math.Clamp(shadowOffsetY, -32.0f, 32.0f);
@@ -1199,7 +1057,7 @@ public sealed class HappyTriggerWindow : Window
         if (this.editTrigger.EnableTextOutline)
         {
             var outlineThickness = this.editTrigger.TextOutlineThickness;
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (ImGui.InputFloat("枠線の太さ", ref outlineThickness, 0.5f, 1.0f))
             {
                 this.editTrigger.TextOutlineThickness = Math.Clamp(outlineThickness, 1.0f, 16.0f);
@@ -1228,70 +1086,18 @@ public sealed class HappyTriggerWindow : Window
         if (this.editTrigger.EnableTextFadeIn)
         {
             var fadeInSeconds = this.editTrigger.TextFadeInSeconds;
-            ImGui.SetNextItemWidth(180.0f);
+            SetEditorFieldWidth(180);
             if (ImGui.InputFloat("フェードイン時間", ref fadeInSeconds, 0.05f, 0.1f))
             {
                 this.editTrigger.TextFadeInSeconds = Math.Clamp(fadeInSeconds, 0.01f, 10.0f);
             }
         }
 
-        var seconds = this.editTrigger.DisplaySeconds;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("表示時間", ref seconds, 0.1f, 1.0f))
-        {
-            this.editTrigger.DisplaySeconds = Math.Max(0.1f, seconds);
-        }
-
-        ImGui.TextDisabled("トリガー文字にヒットした場合、ここで指定した文字を画面位置X/Yに表示します。色・フォントデザイン・枠線・フェードインが反映されます。");
     }
 
-    private void DrawImageSettingArea()
+    private void DrawImageContentSettings()
     {
-        ImGui.Text("画像項目設定 ※トリガーで画像を表示を選択した場合");
-
-        var useOriginalSize = this.editTrigger.UseOriginalImageSize;
-        if (ImGui.Checkbox("画像を元サイズで表示", ref useOriginalSize))
-        {
-            this.editTrigger.UseOriginalImageSize = useOriginalSize;
-        }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled("ONの場合、読み込んだ画像の実サイズを基準に表示します。");
-
-        var width = this.editTrigger.ImageWidth;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("画像幅", ref width, 1.0f, 10.0f))
-        {
-            this.editTrigger.ImageWidth = Math.Max(1.0f, width);
-            this.editTrigger.ImageSize = Math.Max(1.0f, width);
-        }
-
-        var height = this.editTrigger.ImageHeight;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("画像高さ", ref height, 1.0f, 10.0f))
-        {
-            this.editTrigger.ImageHeight = Math.Max(1.0f, height);
-        }
-
-        ImGui.Text("表示倍率");
-        ImGui.SameLine();
-        ImGui.TextDisabled("100%が等倍、50%が半分、200%が2倍です。倍率は常に反映されます。");
-
-        var scalePercent = this.editTrigger.ScalePercent <= 0.0f ? 100.0f : this.editTrigger.ScalePercent;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("表示倍率 %", ref scalePercent, 1.0f, 10.0f))
-        {
-            this.editTrigger.ScalePercent = Math.Clamp(scalePercent, 1.0f, 10000.0f);
-            this.editTrigger.UsePercentScale = true;
-        }
-
-        var seconds = this.editTrigger.DisplaySeconds;
-        ImGui.SetNextItemWidth(180.0f);
-        if (ImGui.InputFloat("表示時間", ref seconds, 0.1f, 1.0f))
-        {
-            this.editTrigger.DisplaySeconds = Math.Max(0.1f, seconds);
-        }
-
+        ImGui.TextWrapped("表示したい画像ファイル、または画像のURLを指定します。");
         var isWeb = this.editTrigger.IsWebImage;
         if (ImGui.Checkbox("Web画像URLを使用する", ref isWeb))
         {
@@ -1299,14 +1105,13 @@ public sealed class HappyTriggerWindow : Window
         }
 
         var imagePath = this.editTrigger.ImagePath ?? string.Empty;
-        ImGui.SetNextItemWidth(700.0f);
+        SetEditorFieldWidth(700);
         if (InputTextJapanese("画像のパス / URL", ref imagePath, 2048))
         {
             this.editTrigger.ImagePath = imagePath;
             this.imageSelectMessage = string.Empty;
         }
 
-        ImGui.SameLine();
 
         if (ImGui.Button("画像を選択", new Vector2(140.0f, 0.0f)))
         {
@@ -1315,26 +1120,66 @@ public sealed class HappyTriggerWindow : Window
 
         if (this.editTrigger.IsWebImage)
         {
-            ImGui.TextDisabled("例: https://example.com/image.png");
+            ImGui.TextWrapped("例: https://example.com/image.png");
         }
         else
         {
-            ImGui.TextDisabled(@"例: C:\Users\Rowsai\Pictures\sample.png");
+            ImGui.TextWrapped(@"例: C:\Users\Rowsai\Pictures\sample.png");
         }
 
         if (!string.IsNullOrWhiteSpace(this.imageSelectMessage))
         {
-            ImGui.TextDisabled(this.imageSelectMessage);
+            ImGui.TextWrapped(this.imageSelectMessage);
         }
 
-        ImGui.TextDisabled("位置設定ボタンを押すと、現在のX/Y座標に表示します。左クリックドラッグで画面位置X/Yに反映、右クリックで閉じます。");
     }
 
+    private void DrawImageAppearanceSettings()
+    {
+        var useOriginalSize = this.editTrigger.UseOriginalImageSize;
+        if (ImGui.Checkbox("画像を元サイズで表示", ref useOriginalSize))
+        {
+            this.editTrigger.UseOriginalImageSize = useOriginalSize;
+        }
+
+        ImGui.TextWrapped("ONの場合、読み込んだ画像の実サイズを基準に表示します。");
+
+        if (!this.editTrigger.UseOriginalImageSize)
+        {
+        var width = this.editTrigger.ImageWidth;
+        SetEditorFieldWidth(180);
+        if (ImGui.InputFloat("画像幅", ref width, 1.0f, 10.0f))
+        {
+            this.editTrigger.ImageWidth = Math.Max(1.0f, width);
+            this.editTrigger.ImageSize = Math.Max(1.0f, width);
+        }
+
+        var height = this.editTrigger.ImageHeight;
+        SetEditorFieldWidth(180);
+        if (ImGui.InputFloat("画像高さ", ref height, 1.0f, 10.0f))
+        {
+            this.editTrigger.ImageHeight = Math.Max(1.0f, height);
+        }
+
+        }
+
+        ImGui.Text("表示倍率");
+        ImGui.TextWrapped("100%が等倍、50%が半分、200%が2倍です。倍率は常に反映されます。");
+
+        var scalePercent = this.editTrigger.ScalePercent <= 0.0f ? 100.0f : this.editTrigger.ScalePercent;
+        SetEditorFieldWidth(180);
+        if (ImGui.InputFloat("表示倍率 %", ref scalePercent, 1.0f, 10.0f))
+        {
+            this.editTrigger.ScalePercent = Math.Clamp(scalePercent, 1.0f, 10000.0f);
+            this.editTrigger.UsePercentScale = true;
+        }
+
+    }
 
     private void DrawTriggerManagementAssignmentArea()
     {
         var currentBoxName = this.GetTriggerBoxDisplayName(this.editTrigger.TriggerBoxId, "未分類");
-        ImGui.SetNextItemWidth(300.0f);
+        SetEditorFieldWidth(300);
         if (ImGui.BeginCombo("トリガーボックス", currentBoxName))
         {
             if (ImGui.Selectable("未分類", string.IsNullOrWhiteSpace(this.editTrigger.TriggerBoxId)))
@@ -1368,10 +1213,9 @@ public sealed class HappyTriggerWindow : Window
             ImGui.EndCombo();
         }
 
-        ImGui.SameLine();
 
         var currentLabelName = this.GetTriggerLabelDisplayName(this.editTrigger.TriggerLabelId, "未分類");
-        ImGui.SetNextItemWidth(300.0f);
+        SetEditorFieldWidth(300);
         if (ImGui.BeginCombo("トリガーラベル", currentLabelName))
         {
             if (ImGui.Selectable("未分類", string.IsNullOrWhiteSpace(this.editTrigger.TriggerLabelId)))
@@ -1408,12 +1252,12 @@ public sealed class HappyTriggerWindow : Window
                 this.editTrigger.UseTriggerLabelPosition = useLabelPosition;
             }
 
-            ImGui.TextDisabled(this.editTrigger.UseTriggerLabelPosition
+            ImGui.TextWrapped(this.editTrigger.UseTriggerLabelPosition
                 ? "ON: ラベルの基準座標から、同じラベル内のONトリガーだけをID順で縦並び表示します。"
                 : "OFF: ラベル座標には連動せず、このログトリガー自身の画面位置X/Yで単独表示します。ラベル座標設定中もこのトリガーだけ単独でドラッグできます。");
         }
 
-        ImGui.TextDisabled("トリガーボックス / トリガーラベルは『トリガー管理』タブで作成できます。未分類のままでも保存できます。");
+        ImGui.TextWrapped("トリガーボックス / トリガーラベルは『トリガー管理』タブで作成できます。未分類のままでも保存できます。");
     }
 
     private void DrawTriggerListTab()
@@ -2963,6 +2807,12 @@ public sealed class HappyTriggerWindow : Window
         "TriggerLabelLineSpacing",
         "TriggerLabelSuppressSameTimestampInternalLogReuse",
         "UseTriggerLabelPosition",
+        "EnableTargetMarker",
+        "TargetMarkerId",
+        "TargetMarkerJobId",
+        "EnableChatSend",
+        "ChatMessageText",
+        "ChatChannel",
         "Keyword",
         "ExactMatch",
         "UseFfxivLogReference",
@@ -3048,6 +2898,12 @@ public sealed class HappyTriggerWindow : Window
             label == null ? string.Empty : FloatText(label.LineSpacing),
             label == null ? string.Empty : BoolText(label.SuppressSameTimestampInternalLogReuse),
             BoolText(trigger.UseTriggerLabelPosition),
+            trigger.EnableTargetMarker.ToString(CultureInfo.InvariantCulture),
+            trigger.TargetMarkerId.ToString(CultureInfo.InvariantCulture),
+            trigger.TargetMarkerJobId.ToString(CultureInfo.InvariantCulture),
+            trigger.EnableChatSend.ToString(CultureInfo.InvariantCulture),
+            trigger.ChatMessageText ?? string.Empty,
+            trigger.ChatChannel ?? string.Empty,
             trigger.Keyword ?? string.Empty,
             BoolText(trigger.ExactMatch),
             BoolText(trigger.UseFfxivLogReference),
@@ -3522,7 +3378,7 @@ public sealed class HappyTriggerWindow : Window
         }
 
         var headers = table[0].Select(header => (header ?? string.Empty).Trim().TrimStart('\ufeff')).ToList();
-        if (headers.Count != ExportCsvHeaders.Length)
+        if (headers.Any(header => !ExportCsvHeaders.Contains(header, StringComparer.OrdinalIgnoreCase)))
         {
             throw new IllegalImportException("CSVヘッダー数が一致しません。");
         }
@@ -3594,6 +3450,12 @@ public sealed class HappyTriggerWindow : Window
                 TriggerBoxId = GetRequired(row, "TriggerBoxId").Trim(),
                 TriggerLabelId = Get(row, "TriggerLabelId").Trim(),
                 UseTriggerLabelPosition = string.IsNullOrWhiteSpace(Get(row, "UseTriggerLabelPosition")) || ParseBool(Get(row, "UseTriggerLabelPosition")),
+                EnableTargetMarker = ParseOptionalBool(row, "EnableTargetMarker", false),
+                TargetMarkerId = string.IsNullOrWhiteSpace(Get(row, "TargetMarkerId")) ? 1u : uint.Parse(Get(row, "TargetMarkerId"), CultureInfo.InvariantCulture),
+                TargetMarkerJobId = string.IsNullOrWhiteSpace(Get(row, "TargetMarkerJobId")) ? 19u : uint.Parse(Get(row, "TargetMarkerJobId"), CultureInfo.InvariantCulture),
+                EnableChatSend = ParseOptionalBool(row, "EnableChatSend", false),
+                ChatMessageText = Get(row, "ChatMessageText"),
+                ChatChannel = string.IsNullOrWhiteSpace(Get(row, "ChatChannel")) ? "say" : Get(row, "ChatChannel"),
                 Keyword = Get(row, "Keyword"),
                 ExactMatch = ParseBool(GetRequired(row, "ExactMatch")),
                 UseFfxivLogReference = ParseBool(GetRequired(row, "UseFfxivLogReference")),
@@ -3851,7 +3713,8 @@ public sealed class HappyTriggerWindow : Window
 
     private static bool IsOptionalImportHeader(string header)
     {
-        return string.Equals(header, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase)
+        return new[] { "EnableTargetMarker", "TargetMarkerId", "TargetMarkerJobId", "EnableChatSend", "ChatMessageText", "ChatChannel" }.Contains(header, StringComparer.OrdinalIgnoreCase)
+            || string.Equals(header, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionX", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionY", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelLineSpacing", StringComparison.OrdinalIgnoreCase)
@@ -4021,6 +3884,7 @@ public sealed class HappyTriggerWindow : Window
 
     private static void ValidateImportedTriggerValues(HappyTriggerSetting trigger)
     {
+        if (TriggerActionRules.Validate(trigger) is { } error) throw new IllegalImportException(error);
         if (string.IsNullOrWhiteSpace(trigger.TriggerBoxId))
         {
             throw new IllegalImportException("所属ボックスIDが不足しています。");
@@ -4067,7 +3931,7 @@ public sealed class HappyTriggerWindow : Window
 
         if (trigger.DisplayTextMode)
         {
-            if (string.IsNullOrWhiteSpace(trigger.DisplayText))
+            if (string.IsNullOrWhiteSpace(trigger.DisplayText) && !trigger.EnableChatSend && !trigger.EnableTargetMarker)
             {
                 throw new IllegalImportException("表示テキストが不足しています。");
             }
@@ -4094,12 +3958,12 @@ public sealed class HappyTriggerWindow : Window
                 throw new IllegalImportException("画像トリガーでVOICEVOX読み上げは使用できません。");
             }
 
-            if (string.IsNullOrWhiteSpace(trigger.ImagePath))
+            if (string.IsNullOrWhiteSpace(trigger.ImagePath) && !trigger.EnableChatSend && !trigger.EnableTargetMarker)
             {
                 throw new IllegalImportException("画像パスが不足しています。");
             }
 
-            if (trigger.IsWebImage)
+            if (trigger.IsWebImage && !string.IsNullOrWhiteSpace(trigger.ImagePath))
             {
                 if (!Uri.TryCreate(trigger.ImagePath, UriKind.Absolute, out var uri)
                     || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -4107,7 +3971,7 @@ public sealed class HappyTriggerWindow : Window
                     throw new IllegalImportException("Web画像URLが不正です。");
                 }
             }
-            else if (!File.Exists(trigger.ImagePath))
+            else if (!string.IsNullOrWhiteSpace(trigger.ImagePath) && !File.Exists(trigger.ImagePath))
             {
                 throw new IllegalImportException("ローカル画像ファイルが存在しません。");
             }
@@ -4414,6 +4278,8 @@ public sealed class HappyTriggerWindow : Window
             this.DrawTriggerDetailRow("ステータス残り時間", trigger.EnableStatusRemainingAppend ? "ON" : "OFF");
             this.DrawTriggerDetailRow("残り時間参照ジョブ", ToDisplayValue(trigger.StatusRemainingJob));
             this.DrawTriggerDetailRow("残り時間参照ステータス", ToDisplayValue(trigger.StatusRemainingStatusName));
+            this.DrawTriggerDetailRow("ターゲットマーカー", trigger.EnableTargetMarker ? $"{this.MarkerName(trigger.TargetMarkerId)} / {this.JobName(trigger.TargetMarkerJobId)}" : "無効");
+            this.DrawTriggerDetailRow("チャット自動送信", trigger.EnableChatSend ? $"/{trigger.ChatChannel} {trigger.ChatMessageText}" : "無効");
             this.DrawTriggerDetailRow("表示種別", trigger.DisplayTextMode ? "テキスト" : "画像");
             this.DrawTriggerDetailRow("表示テキスト", ToDisplayValue(trigger.DisplayText));
             this.DrawTriggerDetailRow("VOICEVOX読み上げ", trigger.EnableVoiceVox ? "ON" : "OFF");
@@ -5226,6 +5092,7 @@ public sealed class HappyTriggerWindow : Window
 
     private void SaveEditingTrigger()
     {
+        if (this.GetEditorProblem() != null) return;
         var saveTargetKind = this.GetSaveTargetKind();
         this.editTrigger.UseFfxivLogReference = saveTargetKind == TriggerListKind.FfxivLog;
         if (this.editTrigger.UseFfxivLogReference)
@@ -5260,6 +5127,7 @@ public sealed class HappyTriggerWindow : Window
         this.saveConfig();
         this.closePositionSettingPopup();
         this.ResetEditing();
+        this.editorNotice = "保存しました。続けて新しいトリガーを作成できます。";
     }
 
     private TriggerListKind GetSaveTargetKind()
@@ -5520,3 +5388,4 @@ public sealed class HappyTriggerWindow : Window
     }
 
 }
+

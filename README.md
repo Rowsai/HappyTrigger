@@ -1,4 +1,4 @@
-# HappyTrigger
+# HappyTrigger 1.0.0.0
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/image/icon.png" width="160" alt="HappyTrigger icon">
@@ -11,7 +11,13 @@ HappyTrigger は、FFXIV / Dalamud 向けの **ログ連動ポップアップ表
 
 ---
 
-## 画面イメージ
+## 1.0.0.0 正式版
+
+ログトリガーの編集画面は「検知条件」「実行内容」「見た目・位置」「名前・整理」の4分類です。
+
+対象ジョブへのターゲットマーカー付与、チャット自動送信、日本語インストーラー情報、新しいダークテーマを追加しました。詳細は [更新内容と確認手順](RELEASE_NOTES_1.0.0.0.md) を参照してください。
+
+## 画面イメージ（旧バージョン）
 
 残り時間つきログトリガーを、トリガーラベルの基準座標から縦積み表示できます。
 

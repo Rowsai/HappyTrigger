@@ -2,14 +2,16 @@
   "Author": "Rowsai",
   "Name": "HappyTrigger",
   "InternalName": "HappyTrigger",
-  "AssemblyVersion": "0.0.1.4",
-  "Description": "Display images or text when chat log keywords appear.",
-  "Punchline": "Display images or text when chat keywords appear.",
+  "AssemblyVersion": "1.0.0.0",
+  "Description": "チャットやゲーム内ログを条件に、画像・テキスト表示、音声読み上げ、対象ジョブへのターゲットマーカー付与、チャット自動送信を行います。トリガーをボックス・ラベルで整理し、CSVで共有できます。",
+  "Punchline": "ログを合図に、表示・読み上げ・マーカー・チャットを実行。",
   "ApplicableVersion": "any",
   "Tags": [
-    "chat",
-    "image",
-    "popup"
+    "トリガー",
+    "チャット",
+    "画像",
+    "マーカー",
+    "読み上げ"
   ],
   "IconUrl": "https://raw.githubusercontent.com/Rowsai/HappyTrigger/main/image/icon.png",
   "DalamudApiLevel": 15,

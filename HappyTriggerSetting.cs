@@ -36,6 +36,14 @@ public sealed class HappyTriggerSetting
 
     public bool Enabled { get; set; } = true;
 
+    public bool EnableTargetMarker { get; set; }
+    public uint TargetMarkerId { get; set; } = 1;
+    public uint TargetMarkerJobId { get; set; } = 19;
+    public bool EnableChatSend { get; set; }
+    public string ChatMessageText { get; set; } = string.Empty;
+    public string ChatChannel { get; set; } = "say";
+
+
     // 画像表示用は I00001、テキスト表示用は T00001 の形式で採番します。
     public string TriggerId { get; set; } = string.Empty;
 
@@ -219,6 +227,13 @@ public sealed class HappyTriggerSetting
         return new HappyTriggerSetting
         {
             Enabled = this.Enabled,
+            EnableTargetMarker = this.EnableTargetMarker,
+            TargetMarkerId = this.TargetMarkerId,
+            TargetMarkerJobId = this.TargetMarkerJobId,
+            EnableChatSend = this.EnableChatSend,
+            ChatMessageText = this.ChatMessageText,
+            ChatChannel = this.ChatChannel,
+
             TriggerId = this.TriggerId,
             TriggerName = this.TriggerName,
             TriggerBoxId = this.TriggerBoxId,

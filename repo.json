@@ -3,22 +3,25 @@
     "Author": "Rowsai",
     "Name": "HappyTrigger",
     "InternalName": "HappyTrigger",
-    "AssemblyVersion": "0.0.1.3",
-    "Description": "Display images or text when chat log keywords appear.",
+    "AssemblyVersion": "1.0.0.0",
+    "Description": "チャットやゲーム内ログを条件に、画像・テキスト表示、音声読み上げ、対象ジョブへのターゲットマーカー付与、チャット自動送信を行います。トリガーをボックス・ラベルで整理し、CSVで共有できます。",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "Punchline": "Display images or text when chat keywords appear.",
+    "Punchline": "ログを合図に、表示・読み上げ・マーカー・チャットを実行。",
     "RepoUrl": "https://github.com/Rowsai/HappyTrigger",
     "IconUrl": "https://raw.githubusercontent.com/Rowsai/HappyTrigger/refs/heads/main/image/icon.png",
-    "DownloadLinkInstall": "https://github.com/Rowsai/HappyTrigger/releases/download/v0.0.1.2/HappyTrigger.zip",
-    "DownloadLinkUpdate": "https://github.com/Rowsai/HappyTrigger/releases/download/v0.0.1.2/HappyTrigger.zip",
-    "DownloadLinkTesting": "https://github.com/Rowsai/HappyTrigger/releases/download/v0.0.1.2/HappyTrigger.zip",
+    "DownloadLinkInstall": "https://github.com/Rowsai/HappyTrigger/releases/download/v1.0.0.0/HappyTrigger.zip",
+    "DownloadLinkUpdate": "https://github.com/Rowsai/HappyTrigger/releases/download/v1.0.0.0/HappyTrigger.zip",
+    "DownloadLinkTesting": "https://github.com/Rowsai/HappyTrigger/releases/download/v1.0.0.0/HappyTrigger.zip",
     "LoadRequiredState": 0,
     "LoadSync": false,
     "CanUnloadAsync": false,
     "Tags": [
-      "overlay",
-      "trigger"
-      ]
+      "トリガー",
+      "チャット",
+      "画像",
+      "マーカー",
+      "読み上げ"
+    ]
   }
 ]
