@@ -176,7 +176,7 @@ public sealed partial class HappyTriggerWindow : Window
         Func<IReadOnlyList<FfxivLogEntry>> getBattleLogs,
         Func<IReadOnlyList<FfxivLogEntry>> getInternalLogs,
         Action clearFfxivLogs)
-        : base("HappyTrigger  v1.0.0.0  |  正式版###HappyTriggerConfigWindow")
+        : base("HappyTrigger  v1.0.1.0###HappyTriggerConfigWindow")
     {
         this.configuration = configuration;
         this.saveConfig = saveConfig;
@@ -190,14 +190,17 @@ public sealed partial class HappyTriggerWindow : Window
         this.getInternalLogs = getInternalLogs;
         this.clearFfxivLogs = clearFfxivLogs;
 
-        this.Size = new Vector2(1050, 700);
+        this.Size = new Vector2(1320, 820);
+        this.SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(1120, 720), MaximumSize = new Vector2(float.MaxValue, float.MaxValue) };
         this.SizeCondition = ImGuiCond.FirstUseEver;
         // ウィンドウ右上の折りたたみ（最小化）ボタンを表示するため、NoCollapse は指定しません。
-        this.Flags = ImGuiWindowFlags.None;
+        this.Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
     }
 
     public override void PreDraw()
     {
+        this.SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(1120, this.headerCollapsed ? 76 : 720), MaximumSize = new Vector2(float.MaxValue, this.headerCollapsed ? 76 : float.MaxValue) };
+        if (this.restoreHeaderSize) { ImGui.SetNextWindowSize(this.expandedWindowSize, ImGuiCond.Always); this.restoreHeaderSize = false; }
         ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.06f, 0.08f, 0.99f));
         ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.06f, 0.07f, 0.10f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.09f, 0.14f, 0.21f, 1.00f));
@@ -207,17 +210,17 @@ public sealed partial class HappyTriggerWindow : Window
         ImGui.PushStyleColor(ImGuiCol.TabActive, new Vector4(0.10f, 0.28f, 0.35f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.TabUnfocused, new Vector4(0.07f, 0.08f, 0.12f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.TabUnfocusedActive, new Vector4(0.09f, 0.20f, 0.27f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.10f, 0.23f, 0.30f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.12f, 0.32f, 0.40f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.14f, 0.39f, 0.47f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.10f, 0.25f, 0.32f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.12f, 0.37f, 0.45f, 1.00f));
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.10f, 0.45f, 0.52f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.20f, 0.17f, 0.29f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.29f, 0.22f, 0.41f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.37f, 0.26f, 0.53f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.24f, 0.19f, 0.35f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.34f, 0.24f, 0.49f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.43f, 0.29f, 0.62f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.07f, 0.10f, 0.14f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, new Vector4(0.10f, 0.17f, 0.23f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.FrameBgActive, new Vector4(0.11f, 0.23f, 0.30f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.19f, 0.25f, 0.33f, 0.70f));
-        ImGui.PushStyleColor(ImGuiCol.CheckMark, new Vector4(0.25f, 0.85f, 0.79f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.CheckMark, new Vector4(0.66f, 0.43f, 0.98f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.25f, 0.78f, 0.75f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, new Vector4(0.40f, 0.95f, 0.87f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.90f, 0.93f, 0.98f, 1.00f));
@@ -226,6 +229,7 @@ public sealed partial class HappyTriggerWindow : Window
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Vector4(0.06f, 0.08f, 0.12f, 0.99f));
         ImGui.PushStyleColor(ImGuiCol.TableHeaderBg, new Vector4(0.09f, 0.14f, 0.20f, 1.00f));
         ImGui.PushStyleColor(ImGuiCol.TableRowBgAlt, new Vector4(0.13f, 0.18f, 0.25f, 0.25f));
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 10.0f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 10.0f);
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5.0f);
         ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 7.0f);
@@ -238,63 +242,20 @@ public sealed partial class HappyTriggerWindow : Window
     public override void PostDraw()
     {
         ImGui.PopStyleColor(StyleColorCount);
-        ImGui.PopStyleVar(7);
+        ImGui.PopStyleVar(8);
     }
 
     public override void Draw()
     {
-        this.DrawHeader();
-
-        if (ImGui.BeginTabBar("HappyTriggerTabBar"))
-        {
-            var triggerEditTabFlags = this.requestOpenTriggerEditTab
-                ? ImGuiTabItemFlags.SetSelected
-                : ImGuiTabItemFlags.None;
-
-            if (ImGui.BeginTabItem("ログトリガー", triggerEditTabFlags))
-            {
-                this.requestOpenTriggerEditTab = false;
-                this.DrawTriggerEditTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("トリガー一覧"))
-            {
-                this.DrawTriggerListTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("トリガー管理"))
-            {
-                this.DrawTriggerManagementTab();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("FFXIV Log"))
-            {
-                this.DrawFfxivLogTab();
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
-        }
+        this.DrawCustomTitleBar();
+        if (this.headerCollapsed) return;
+        this.DrawPaneLayout();
 
         this.DrawImportCoordinateOverwritePopup();
         this.DrawDeleteConfirmPopup();
         this.DrawManagementIdEditPopup();
         this.DrawBoxLocationSettingPopup();
         this.DrawLabelLocationSettingPopup();
-    }
-
-    private void DrawHeader()
-    {
-        ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), "HAPPY TRIGGER");
-        ImGui.SameLine();
-        ImGui.TextDisabled("ログから、次のアクションへ。");
-        var triggers = this.GetAllTriggers();
-        ImGui.TextDisabled($"登録 {triggers.Count} 件   /   有効 {triggers.Count(t => t.Enabled)} 件   /   ボックス {this.configuration.TriggerBoxes.Count} 件");
-        ImGui.Separator();
-        ImGui.Spacing();
     }
 
     private void DrawFfxivLogReferenceSettingArea()
@@ -1262,14 +1223,9 @@ public sealed partial class HappyTriggerWindow : Window
 
     private void DrawTriggerListTab()
     {
-        ImGui.Spacing();
-        this.DrawImageTriggerTable();
-        ImGui.Spacing();
-        ImGui.Spacing();
-        this.DrawTextTriggerTable();
-        ImGui.Spacing();
-        ImGui.Spacing();
-        this.DrawFfxivLogTriggerTable();
+        this.DrawTriggerCards("画像トリガー", this.configuration.Triggers, TriggerListKind.Image);
+        this.DrawTriggerCards("テキストトリガー", this.configuration.TextTriggers, TriggerListKind.Text);
+        this.DrawTriggerCards("ゲーム内ログトリガー", this.configuration.FfxivLogTriggers, TriggerListKind.FfxivLog);
     }
 
     private void DrawImageTriggerTable()
@@ -1282,7 +1238,7 @@ public sealed partial class HappyTriggerWindow : Window
             return;
         }
 
-        var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
+        var tableFlags = ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
 
         if (ImGui.BeginTable("HappyTriggerImageTriggerTable", 12, tableFlags))
         {
@@ -1366,7 +1322,7 @@ public sealed partial class HappyTriggerWindow : Window
             return;
         }
 
-        var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
+        var tableFlags = ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
 
         if (ImGui.BeginTable("HappyTriggerTextTriggerTable", 13, tableFlags))
         {
@@ -1458,7 +1414,7 @@ public sealed partial class HappyTriggerWindow : Window
             return;
         }
 
-        var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
+        var tableFlags = ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
 
         if (ImGui.BeginTable("HappyTriggerFfxivLogTriggerTable", 13, tableFlags))
         {
@@ -1906,7 +1862,7 @@ public sealed partial class HappyTriggerWindow : Window
             return;
         }
 
-        if (ImGui.BeginTable("HappyTriggerBoxTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("HappyTriggerBoxTable", 7, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 70.0f);
@@ -2002,7 +1958,7 @@ public sealed partial class HappyTriggerWindow : Window
             return;
         }
 
-        if (ImGui.BeginTable("HappyTriggerLabelTable", 13, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("HappyTriggerLabelTable", 13, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
             ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 90.0f);
             ImGui.TableSetupColumn("有効", ImGuiTableColumnFlags.WidthFixed, 70.0f);
@@ -2618,10 +2574,12 @@ public sealed partial class HappyTriggerWindow : Window
         foreach (var box in this.configuration.TriggerBoxes)
         {
             var boxHeader = this.GetTriggerBoxDisplayName(box.BoxId, "名称未設定");
-            var isOpen = ImGui.TreeNode(boxHeader);
+            this.DrawRoundedTreeRow();
+            var isOpen = ImGui.TreeNode(FitTreeName(boxHeader) + $"###box_{box.BoxId}");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(boxHeader);
 
-            ImGui.SameLine();
-            if (ImGui.SmallButton($"export##box_export_{box.BoxId}"))
+            TreeActionSlot(2);
+            if (ImGui.Button($"export##box_export_{box.BoxId}", new Vector2(TreeButtonWidth, 0)))
             {
                 this.ExportTriggerBoxToCsv(box);
             }
@@ -2631,8 +2589,8 @@ public sealed partial class HappyTriggerWindow : Window
                 ImGui.SetTooltip("このトリガーボックス配下のトリガーをCSV形式で出力します。");
             }
 
-            ImGui.SameLine();
-            if (ImGui.SmallButton($"削除##box_tree_delete_{box.BoxId}"))
+            TreeActionSlot(4);
+            if (ImGui.Button($"削除##box_tree_delete_{box.BoxId}", new Vector2(TreeButtonWidth, 0)))
             {
                 this.RequestDeleteTriggerBox(box);
             }
@@ -2642,10 +2600,12 @@ public sealed partial class HappyTriggerWindow : Window
                 foreach (var label in this.configuration.TriggerLabels.Where(label => string.Equals(label.BoxId, box.BoxId, StringComparison.OrdinalIgnoreCase)))
                 {
                     var labelHeader = this.GetTriggerLabelDisplayName(label.LabelId, "名称未設定");
-                    var isLabelOpen = ImGui.TreeNode(labelHeader);
+                    this.DrawRoundedTreeRow();
+                    var isLabelOpen = ImGui.TreeNode(FitTreeName(labelHeader) + $"###label_{label.LabelId}");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(labelHeader);
 
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"テスト##label_tree_test_{label.LabelId}"))
+                    TreeActionSlot(0);
+                    if (ImGui.Button($"テスト##label_tree_test_{label.LabelId}", new Vector2(TreeButtonWidth, 0)))
                     {
                         this.TestTriggersForLabel(label.LabelId);
                     }
@@ -2655,8 +2615,8 @@ public sealed partial class HappyTriggerWindow : Window
                         ImGui.SetTooltip("このラベル配下のログトリガーをまとめてテスト表示します。");
                     }
 
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"座標設定##label_tree_position_{label.LabelId}"))
+                    TreeActionSlot(1);
+                    if (ImGui.Button($"座標設定##label_tree_position_{label.LabelId}", new Vector2(TreeButtonWidth, 0)))
                     {
                         this.StartPositionSettingForLabel(label.LabelId);
                     }
@@ -2666,8 +2626,8 @@ public sealed partial class HappyTriggerWindow : Window
                         ImGui.SetTooltip("このラベルの基準座標を設定します。配下ログトリガーをID順に縦並び表示し、ドラッグした移動量をラベル座標へ反映します。右クリックで閉じます。");
                     }
 
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"削除##label_tree_delete_{label.LabelId}"))
+                    TreeActionSlot(4);
+                    if (ImGui.Button($"削除##label_tree_delete_{label.LabelId}", new Vector2(TreeButtonWidth, 0)))
                     {
                         this.RequestDeleteTriggerLabel(label);
                     }
@@ -2810,6 +2770,8 @@ public sealed partial class HappyTriggerWindow : Window
         "EnableTargetMarker",
         "TargetMarkerId",
         "TargetMarkerJobId",
+        "EnableCountdown",
+        "CountdownSeconds",
         "EnableChatSend",
         "ChatMessageText",
         "ChatChannel",
@@ -2901,6 +2863,8 @@ public sealed partial class HappyTriggerWindow : Window
             trigger.EnableTargetMarker.ToString(CultureInfo.InvariantCulture),
             trigger.TargetMarkerId.ToString(CultureInfo.InvariantCulture),
             trigger.TargetMarkerJobId.ToString(CultureInfo.InvariantCulture),
+            trigger.EnableCountdown.ToString(CultureInfo.InvariantCulture),
+            trigger.CountdownSeconds.ToString(CultureInfo.InvariantCulture),
             trigger.EnableChatSend.ToString(CultureInfo.InvariantCulture),
             trigger.ChatMessageText ?? string.Empty,
             trigger.ChatChannel ?? string.Empty,
@@ -3453,6 +3417,8 @@ public sealed partial class HappyTriggerWindow : Window
                 EnableTargetMarker = ParseOptionalBool(row, "EnableTargetMarker", false),
                 TargetMarkerId = string.IsNullOrWhiteSpace(Get(row, "TargetMarkerId")) ? 1u : uint.Parse(Get(row, "TargetMarkerId"), CultureInfo.InvariantCulture),
                 TargetMarkerJobId = string.IsNullOrWhiteSpace(Get(row, "TargetMarkerJobId")) ? 19u : uint.Parse(Get(row, "TargetMarkerJobId"), CultureInfo.InvariantCulture),
+                EnableCountdown = ParseOptionalBool(row, "EnableCountdown", false),
+                CountdownSeconds = ParseOptionalFloat(row, "CountdownSeconds", 120f),
                 EnableChatSend = ParseOptionalBool(row, "EnableChatSend", false),
                 ChatMessageText = Get(row, "ChatMessageText"),
                 ChatChannel = string.IsNullOrWhiteSpace(Get(row, "ChatChannel")) ? "say" : Get(row, "ChatChannel"),
@@ -3713,7 +3679,7 @@ public sealed partial class HappyTriggerWindow : Window
 
     private static bool IsOptionalImportHeader(string header)
     {
-        return new[] { "EnableTargetMarker", "TargetMarkerId", "TargetMarkerJobId", "EnableChatSend", "ChatMessageText", "ChatChannel" }.Contains(header, StringComparer.OrdinalIgnoreCase)
+        return new[] { "EnableCountdown", "CountdownSeconds", "EnableTargetMarker", "TargetMarkerId", "TargetMarkerJobId", "EnableChatSend", "ChatMessageText", "ChatChannel" }.Contains(header, StringComparer.OrdinalIgnoreCase)
             || string.Equals(header, "UseTriggerLabelPosition", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionX", StringComparison.OrdinalIgnoreCase)
             || string.Equals(header, "TriggerLabelPositionY", StringComparison.OrdinalIgnoreCase)
@@ -3931,7 +3897,7 @@ public sealed partial class HappyTriggerWindow : Window
 
         if (trigger.DisplayTextMode)
         {
-            if (string.IsNullOrWhiteSpace(trigger.DisplayText) && !trigger.EnableChatSend && !trigger.EnableTargetMarker)
+            if (string.IsNullOrWhiteSpace(trigger.DisplayText) && !trigger.EnableCountdown && !trigger.EnableChatSend && !trigger.EnableTargetMarker)
             {
                 throw new IllegalImportException("表示テキストが不足しています。");
             }
@@ -4081,6 +4047,7 @@ public sealed partial class HappyTriggerWindow : Window
         var isSelected = string.Equals(this.selectedManagementTriggerKey, rowKey, StringComparison.OrdinalIgnoreCase);
         var displayName = GetTriggerDisplayName(trigger);
 
+        this.DrawRoundedTreeRow();
         ImGui.Bullet();
         ImGui.SameLine();
 
@@ -4089,7 +4056,7 @@ public sealed partial class HappyTriggerWindow : Window
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.92f, 0.25f, 1.0f));
         }
 
-        ImGui.TextUnformatted(displayName);
+        ImGui.TextUnformatted(FitTreeName(displayName));
 
         if (isSelected)
         {
@@ -4104,32 +4071,32 @@ public sealed partial class HappyTriggerWindow : Window
         if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip(isSelected
-                ? "クリックすると、このトリガーの詳細表示を閉じます。"
-                : "クリックすると、このトリガーの保存済み設定を表示します。");
+                ? displayName + "\nクリックすると詳細を閉じます。"
+                : displayName + "\nクリックすると詳細を表示します。");
         }
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton($"テスト##management_test_{rowKey}"))
+        TreeActionSlot(0);
+        if (ImGui.Button($"テスト##management_test_{rowKey}", new Vector2(TreeButtonWidth, 0)))
         {
             this.testTrigger(trigger);
         }
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton($"編集##management_edit_{rowKey}"))
+        TreeActionSlot(1);
+        if (ImGui.Button($"編集##management_edit_{rowKey}", new Vector2(TreeButtonWidth, 0)))
         {
             this.BeginEditTrigger(index, listKind, trigger);
         }
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton($"コピー##management_copy_{rowKey}"))
+        TreeActionSlot(2);
+        if (ImGui.Button($"コピー##management_copy_{rowKey}", new Vector2(TreeButtonWidth, 0)))
         {
             this.CopyTrigger(index, listKind);
         }
 
         if (listKind == TriggerListKind.FfxivLog)
         {
-            ImGui.SameLine();
-            if (ImGui.SmallButton($"ID更新##management_id_update_{rowKey}"))
+            TreeActionSlot(3);
+            if (ImGui.Button($"ID更新##management_id_update_{rowKey}", new Vector2(TreeButtonWidth, 0)))
             {
                 this.manualTriggerIdEditKey = rowKey;
                 this.manualTriggerIdInput = trigger.TriggerId ?? string.Empty;
@@ -4137,8 +4104,8 @@ public sealed partial class HappyTriggerWindow : Window
             }
         }
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton($"削除##management_delete_{rowKey}"))
+        TreeActionSlot(4);
+        if (ImGui.Button($"削除##management_delete_{rowKey}", new Vector2(TreeButtonWidth, 0)))
         {
             this.RequestDeleteTrigger(index, listKind, trigger);
             return false;
@@ -4257,7 +4224,7 @@ public sealed partial class HappyTriggerWindow : Window
     {
         ImGui.Indent(24.0f);
 
-        if (ImGui.BeginTable($"ManagementTriggerDetail_{this.selectedManagementTriggerKey}", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        if (ImGui.BeginTable($"ManagementTriggerDetail_{this.selectedManagementTriggerKey}", 2, ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("項目", ImGuiTableColumnFlags.WidthFixed, 180.0f);
             ImGui.TableSetupColumn("内容");
@@ -4279,6 +4246,7 @@ public sealed partial class HappyTriggerWindow : Window
             this.DrawTriggerDetailRow("残り時間参照ジョブ", ToDisplayValue(trigger.StatusRemainingJob));
             this.DrawTriggerDetailRow("残り時間参照ステータス", ToDisplayValue(trigger.StatusRemainingStatusName));
             this.DrawTriggerDetailRow("ターゲットマーカー", trigger.EnableTargetMarker ? $"{this.MarkerName(trigger.TargetMarkerId)} / {this.JobName(trigger.TargetMarkerJobId)}" : "無効");
+            this.DrawTriggerDetailRow("カウントダウン", trigger.EnableCountdown ? $"{trigger.CountdownSeconds:0.00}s（検知時から）" : "無効");
             this.DrawTriggerDetailRow("チャット自動送信", trigger.EnableChatSend ? $"/{trigger.ChatChannel} {trigger.ChatMessageText}" : "無効");
             this.DrawTriggerDetailRow("表示種別", trigger.DisplayTextMode ? "テキスト" : "画像");
             this.DrawTriggerDetailRow("表示テキスト", ToDisplayValue(trigger.DisplayText));

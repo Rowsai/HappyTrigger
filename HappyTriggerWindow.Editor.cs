@@ -1,11 +1,13 @@
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 
 namespace HappyTrigger;
 
 public sealed partial class HappyTriggerWindow
 {
+    private int editorPage;
     private string editorNotice = string.Empty;
 
     private static void SetEditorFieldWidth(float preferred)
@@ -14,46 +16,52 @@ public sealed partial class HappyTriggerWindow
     private static void EditorSection(string title, string description)
     {
         ImGui.Spacing();
-        ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), title);
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.75f, 0.61f, 1, 1), title);
         ImGui.TextWrapped(description);
         ImGui.Spacing();
     }
 
     private void DrawTriggerEditTab()
     {
-        ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), this.editingIndex >= 0 ? "トリガーを編集" : "新しいトリガーを作成");
-        ImGui.TextWrapped("まず「検知条件」で合図を決め、「実行内容」で起こしたい動作を設定します。見た目や分類は必要に応じて調整できます。");
-
-        // Footer is outside the scrolling form so long advanced settings cannot hide Save.
-        var footerHeight = ImGui.GetFrameHeightWithSpacing() * 2 + ImGui.GetTextLineHeightWithSpacing() * 3 + 16;
-        var bodyHeight = Math.Max(160, ImGui.GetContentRegionAvail().Y - footerHeight - ImGui.GetFrameHeightWithSpacing());
-        if (ImGui.BeginTabBar("TriggerEditorSections"))
+        var footerHeight = ImGui.GetFrameHeightWithSpacing() * 2 + ImGui.GetTextLineHeightWithSpacing() * 5 + 24;
+        var bodyHeight = Math.Max(180, ImGui.GetContentRegionAvail().Y - footerHeight);
+        if (ImGui.BeginChild("EditorCategories", new Vector2(180, bodyHeight), true))
         {
-            DrawPage("01  検知条件", "EditorConditions", this.DrawEditorConditions);
-            DrawPage("02  実行内容", "EditorOutputs", this.DrawEditorOutputs);
-            DrawPage("03  見た目・位置", "EditorAppearance", this.DrawEditorAppearance);
-            DrawPage("04  名前・整理", "EditorOrganization", this.DrawEditorOrganization);
-            ImGui.EndTabBar();
+            ImGui.TextDisabled("トリガーの設定");
+            ImGui.Spacing();
+            string[] labels = { "検知条件", "実行内容", "見た目・位置", "名前・整理" };
+            string[] hints = { "いつ反応させるか", "何を起こすか", "表示の調整", "名前と保存先" };
+            FontAwesomeIcon[] icons = { FontAwesomeIcon.Search, FontAwesomeIcon.Play, FontAwesomeIcon.SlidersH, FontAwesomeIcon.Tags };
+            for (var i = 0; i < labels.Length; i++)
+                if (PaneNavigation($"0{i + 1}", labels[i], hints[i], this.editorPage == i, icons[i])) this.editorPage = i;
         }
-
-        void DrawPage(string label, string id, Action draw)
+        ImGui.EndChild();
+        ImGui.SameLine();
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.075f, 0.08f, 0.105f, 1));
+        if (ImGui.BeginChild($"EditorSettings{this.editorPage}", new Vector2(0, bodyHeight), true))
         {
-            if (!ImGui.BeginTabItem(label)) return;
-            if (ImGui.BeginChild(id, new Vector2(0, bodyHeight), false)) draw();
-            ImGui.EndChild();
-            ImGui.EndTabItem();
+            switch (this.editorPage)
+            {
+                case 0: this.DrawEditorConditions(); break;
+                case 1: this.DrawEditorOutputs(); break;
+                case 2: this.DrawEditorAppearance(); break;
+                case 3: this.DrawEditorOrganization(); break;
+            }
         }
+        ImGui.EndChild();
+        ImGui.PopStyleColor();
         if (ImGui.IsAnyItemActive()) this.editorNotice = string.Empty;
 
         ImGui.Separator();
         var problem = this.GetEditorProblem();
-        var hasOutputText = this.editTrigger.DisplayTextMode ? !string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
+        var hasOutputText = this.editTrigger.DisplayTextMode ? (!string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) || this.editTrigger.EnableCountdown) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
         var output = hasOutputText ? (this.editTrigger.DisplayTextMode ? "テキスト" : "画像") : "画面表示なし";
         if (this.editTrigger.EnableTargetMarker) output += " / マーカー";
         if (this.editTrigger.EnableChatSend) output += " / チャット";
         ImGui.TextWrapped($"{(this.editTrigger.UseFfxivLogReference ? "ゲーム内ログ" : "チャットのキーワード")} → {output}");
         if (!string.IsNullOrEmpty(this.editorNotice)) ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), this.editorNotice);
-        else if (problem != null) ImGui.TextColored(new Vector4(1, 0.7f, 0.4f, 1), problem);
+        else if (problem != null) { ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.7f, 0.4f, 1)); ImGui.TextWrapped(problem); ImGui.PopStyleColor(); }
         else ImGui.TextColored(new Vector4(0.25f, 0.85f, 0.79f, 1), string.IsNullOrEmpty(this.editorNotice) ? "入力が揃いました。保存できます。" : this.editorNotice);
 
         ImGui.BeginDisabled(problem != null);
@@ -64,7 +72,7 @@ public sealed partial class HappyTriggerWindow
         ImGui.SameLine();
         ImGui.TextDisabled(this.editTrigger.Enabled ? "保存後：有効" : "保存後：無効");
 
-        var hasDisplay = this.editTrigger.DisplayTextMode ? !string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
+        var hasDisplay = this.editTrigger.DisplayTextMode ? (!string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) || this.editTrigger.EnableCountdown) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
         ImGui.BeginDisabled(!hasDisplay);
         if (ImGui.Button("表示・読み上げをテスト")) this.testTrigger(this.editTrigger);
         ImGui.SameLine();
@@ -85,7 +93,7 @@ public sealed partial class HappyTriggerWindow
         if (ImGui.Combo("一致のしかた", ref match, new[] { "入力した言葉を含む（部分一致）", "入力した言葉と同じ（完全一致）" }, 2)) this.editTrigger.ExactMatch = match == 1;
         if (this.editTrigger.UseFfxivLogReference)
         {
-            EditorSection("検知するログの内容", "「FFXIV Log」タブで実際のログを確認し、反応させたい文言を入力してください。");
+            EditorSection("検知するログの内容", "左メニューの「Logs」で実際のログを確認し、反応させたい文言を入力してください。");
             this.DrawFfxivLogReferenceSettingArea();
         }
         else
@@ -103,21 +111,42 @@ public sealed partial class HappyTriggerWindow
         EditorSection("画面に出す内容", "画像またはテキストを選んで内容を指定します。マーカー・チャットだけを使う場合は、表示内容を空欄にできます。");
         var mode = this.editTrigger.DisplayTextMode ? 1 : 0;
         SetEditorFieldWidth(320);
-        if (ImGui.Combo("表示するもの", ref mode, new[] { "画像", "テキスト" }, 2)) this.editTrigger.DisplayTextMode = mode == 1;
-        if (this.editTrigger.DisplayTextMode) this.DrawTextContentSettings();
+        if (ImGui.Combo("表示するもの", ref mode, new[] { "画像", "テキスト" }, 2)) { this.editTrigger.DisplayTextMode = mode == 1; if (mode == 0) this.editTrigger.EnableCountdown = false; }
+        if (this.editTrigger.DisplayTextMode) { this.DrawTextContentSettings(); this.DrawCountdownSettings(); }
         else this.DrawImageContentSettings();
 
-        if (this.editTrigger.UseFfxivLogReference && this.editTrigger.DisplayTextMode && ImGui.CollapsingHeader("表示にステータスの残り時間を追加")) this.DrawStatusTimerSettings();
+        if (!this.editTrigger.EnableCountdown && this.editTrigger.UseFfxivLogReference && this.editTrigger.DisplayTextMode && ImGui.CollapsingHeader("表示にステータスの残り時間を追加")) this.DrawStatusTimerSettings();
         ImGui.Spacing();
         this.DrawTriggerActions();
+    }
+
+    private void DrawCountdownSettings()
+    {
+        EditorSection("カウントダウン", "検知した瞬間から、指定した秒数をカウントダウンします。");
+        var enabled = this.editTrigger.EnableCountdown;
+        if (ImGui.Checkbox("表示テキストにカウントダウンを付ける", ref enabled))
+        {
+            this.editTrigger.EnableCountdown = enabled;
+            if (enabled) this.editTrigger.EnableStatusRemainingAppend = false;
+        }
+        if (!enabled) return;
+        var seconds = this.editTrigger.CountdownSeconds;
+        SetEditorFieldWidth(220);
+        if (ImGui.InputFloat("カウントダウン秒数", ref seconds, 1, 10, "%.2f")) this.editTrigger.CountdownSeconds = seconds;
+        ImGui.TextWrapped($"表示例：{this.editTrigger.DisplayText}{this.editTrigger.CountdownSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}s");
+        ImGui.TextWrapped("例：本文「次のバーストまで＠」＋120.00秒。0秒で非表示、再検知すると最初から開始します。本文を空欄にすると秒数だけ表示します。");
+        ImGui.TextWrapped("表示待機中もカウントは進みます。ステータス残り時間とは併用できません。小数秒を滑らかに更新するため標準フォント描画を使用し、くっきり表示のWindowsフォント指定は適用しません。");
     }
 
     private void DrawEditorAppearance()
     {
         EditorSection("表示時間と位置", "画面表示の調整です。マーカー付与・チャット送信の実行タイミングには影響しません。");
+        ImGui.BeginDisabled(this.editTrigger.EnableCountdown);
         var seconds = this.editTrigger.DisplaySeconds;
         SetEditorFieldWidth(180);
         if (ImGui.InputFloat("表示する秒数", ref seconds, 0.1f, 1)) this.editTrigger.DisplaySeconds = Math.Clamp(seconds, 0.1f, 3600);
+        ImGui.EndDisabled();
+        if (this.editTrigger.EnableCountdown) ImGui.TextWrapped("カウントダウン中は通常の表示秒数を使わず、残り0秒で終了します。");
         var wait = this.editTrigger.WaitSeconds;
         SetEditorFieldWidth(180);
         if (ImGui.InputFloat("表示までの待機秒数", ref wait, 0.1f, 1)) this.editTrigger.WaitSeconds = Math.Clamp(wait, 0, 600);
@@ -159,7 +188,7 @@ public sealed partial class HappyTriggerWindow
         }
         else if (string.IsNullOrWhiteSpace(this.editTrigger.Keyword)) return "01 検知条件：検知する言葉を入力してください。";
         if (TriggerActionRules.Validate(this.editTrigger) is { } error) return $"02 実行内容：{error}";
-        var hasDisplay = this.editTrigger.DisplayTextMode ? !string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
+        var hasDisplay = this.editTrigger.DisplayTextMode ? (!string.IsNullOrWhiteSpace(this.editTrigger.DisplayText) || this.editTrigger.EnableCountdown) : !string.IsNullOrWhiteSpace(this.editTrigger.ImagePath);
         if (!hasDisplay && !this.editTrigger.EnableTargetMarker && !this.editTrigger.EnableChatSend) return "02 実行内容：画像・テキスト・マーカー・チャットのいずれかを設定してください。";
         return null;
     }

@@ -36,6 +36,9 @@ public sealed class HappyTriggerSetting
 
     public bool Enabled { get; set; } = true;
 
+    public bool EnableCountdown { get; set; }
+    public float CountdownSeconds { get; set; } = 120.0f;
+
     public bool EnableTargetMarker { get; set; }
     public uint TargetMarkerId { get; set; } = 1;
     public uint TargetMarkerJobId { get; set; } = 19;
@@ -227,6 +230,8 @@ public sealed class HappyTriggerSetting
         return new HappyTriggerSetting
         {
             Enabled = this.Enabled,
+            EnableCountdown = this.EnableCountdown,
+            CountdownSeconds = this.CountdownSeconds,
             EnableTargetMarker = this.EnableTargetMarker,
             TargetMarkerId = this.TargetMarkerId,
             TargetMarkerJobId = this.TargetMarkerJobId,

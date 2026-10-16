@@ -1327,12 +1327,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (trigger.DisplayTextMode)
         {
-            if (string.IsNullOrWhiteSpace(trigger.DisplayText))
+            if (string.IsNullOrWhiteSpace(trigger.DisplayText) && !trigger.EnableCountdown)
             {
                 return;
             }
 
             trigger.DisplayTextMode = true;
+            if (trigger.EnableCountdown && !string.IsNullOrWhiteSpace(trigger.TriggerId))
+                this.activePopups.RemoveAll(p => !p.IsPositionSetting && p.HasCountdown && p.Trigger.TriggerId == trigger.TriggerId);
             this.activePopups.RemoveAll(x => x.IsExpired || x.IsClosed);
             var statusRemainingDisplayState = statusRemainingSnapshot == null
                 ? null
@@ -2267,7 +2269,7 @@ public sealed class Plugin : IDalamudPlugin
             // ImGui標準フォントを大きく拡大すると、フォントアトラスの小さい字形を引き伸ばすため滲みます。
             // くっきり表示ONでは、Windows側で表示サイズそのものの文字画像を作り、テクスチャとして描画します。
             // これにより大きい文字でも拡大ボケせず、縁取りもはっきりします。
-            if (trigger.EnableTextSharpRendering && !string.IsNullOrEmpty(displayText))
+            if (trigger.EnableTextSharpRendering && !popup.HasCountdown && !string.IsNullOrEmpty(displayText))
             {
                 var layoutText = GetPopupDisplayTextLayout(popup);
                 var textureResult = this.textTextureCacheService.GetTextTexture(displayText, layoutText, trigger, fadeAlpha);
@@ -2359,6 +2361,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         var displayText = popup.Trigger.DisplayText ?? string.Empty;
 
+        if (popup.HasCountdown) return displayText + popup.CurrentCountdownSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "s";
+
         if (!popup.HasStatusRemainingDisplay)
         {
             return displayText;
@@ -2379,6 +2383,11 @@ public sealed class Plugin : IDalamudPlugin
     {
         var displayText = popup.Trigger.DisplayText ?? string.Empty;
 
+        if (popup.HasCountdown)
+        {
+            var digits = ((int)popup.CountdownInitialSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture).Length;
+            return displayText + new string('8', digits) + ".88s";
+        }
         if (!popup.HasStatusRemainingDisplay)
         {
             return displayText;

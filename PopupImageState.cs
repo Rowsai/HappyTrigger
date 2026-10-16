@@ -32,6 +32,13 @@ public sealed class PopupImageState
 
     public bool IsClosed { get; set; }
 
+    public bool HasCountdown { get; }
+    public float CountdownInitialSeconds { get; }
+    public float CountdownRemainingAt(DateTime utcNow) => this.IsPositionSetting
+        ? this.CountdownInitialSeconds
+        : Math.Max(0, this.CountdownInitialSeconds - (float)Math.Max(0, (utcNow - this.DetectedTimeUtc).TotalSeconds));
+    public float CurrentCountdownSeconds => this.CountdownRemainingAt(DateTime.UtcNow);
+
     public bool HasStatusRemainingDisplay { get; }
 
     public string StatusRemainingStatusName { get; } = string.Empty;
@@ -52,6 +59,8 @@ public sealed class PopupImageState
         this.PositionSettingGroupId = isPositionSetting ? positionSettingGroupId : string.Empty;
         this.LabelStack = labelStack;
         this.DetectedTimeUtc = DateTime.UtcNow;
+        this.HasCountdown = trigger.DisplayTextMode && trigger.EnableCountdown;
+        this.CountdownInitialSeconds = float.IsFinite(trigger.CountdownSeconds) ? Math.Clamp(trigger.CountdownSeconds, 0.01f, 86400f) : 120f;
 
         if (isPositionSetting)
         {
@@ -64,10 +73,10 @@ public sealed class PopupImageState
             var displaySeconds = Math.Max(0.1f, trigger.DisplaySeconds);
 
             this.StartTimeUtc = this.DetectedTimeUtc.AddSeconds(waitSeconds);
-            this.EndTimeUtc = this.StartTimeUtc.AddSeconds(displaySeconds);
+            this.EndTimeUtc = this.HasCountdown ? this.DetectedTimeUtc.AddSeconds(this.CountdownInitialSeconds) : this.StartTimeUtc.AddSeconds(displaySeconds);
         }
 
-        if (!isPositionSetting && statusRemainingDisplayState != null)
+        if (!isPositionSetting && !this.HasCountdown && statusRemainingDisplayState != null)
         {
             var elapsedUntilDisplay = (float)Math.Max(0.0, (this.StartTimeUtc - statusRemainingDisplayState.CapturedAtUtc).TotalSeconds);
             this.HasStatusRemainingDisplay = true;

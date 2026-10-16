@@ -13,6 +13,10 @@ internal static class TriggerActionRules
 {
     public static string? Validate(HappyTriggerSetting setting)
     {
+        if (setting.EnableCountdown && (!setting.DisplayTextMode || !float.IsFinite(setting.CountdownSeconds) || setting.CountdownSeconds < 0.01f || setting.CountdownSeconds > 86400f))
+            return "カウントダウンはテキスト表示で、0.01～86400.00秒を指定してください。";
+        if (setting.EnableCountdown && setting.EnableStatusRemainingAppend)
+            return "カウントダウンとステータス残り時間は同時に使用できません。";
         if (setting.EnableTargetMarker && (setting.TargetMarkerId is < 1 or > 17 || setting.TargetMarkerJobId == 0))
             return "ターゲットマーカーと対象ジョブを選択してください。";
         if (setting.EnableChatSend)
